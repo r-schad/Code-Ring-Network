@@ -16,7 +16,7 @@ class RingLayer:
         self.headings = np.array([[np.cos(dir), np.sin(dir)] for dir in self.directions])
         
 
-    def draw(self, activations: np.ndarray, duration: int, start_point: np.ndarray = [0,0]) -> np.ndarray:
+    def draw(self, activations: np.ndarray, draw_duration: float, start_point: np.ndarray = [0,0], save_gif: bool = False, gif_duration: int = 5) -> np.ndarray:
         '''
         :param activations np.ndarray: array of size n with activation values for each neuron at each index
         :param duration int: length of the lines to be drawn TODO: change this to take a sequence of durations
@@ -27,21 +27,20 @@ class RingLayer:
         '''
         xs = [start_point[0]]
         ys = [start_point[1]]
-        for t, act in enumerate(activations):
+        for act in activations:
             dir_vec = act @ self.headings
-            linex, liney = duration * dir_vec
+            linex, liney = draw_duration * dir_vec
             xs.append(xs[-1] + linex)
             ys.append(ys[-1] + liney)
 
-        frames = []
-        for t in range(len(activations)):
-            self.create_frame(xs, ys, t)
-            image = imageio.v2.imread(f'.\\img\\img_{t}.png')
-            frames.append(image)
+        if save_gif:
+            frames = []
+            for t in range(len(activations)):
+                self.create_frame(xs, ys, t)
+                image = imageio.v2.imread(f'.\\img\\img_{t}.png')
+                frames.append(image)
 
-        imageio.mimsave('example.gif', # output gif
-                frames,          # array of input frames
-                duration = 5)         # optional: frames per second
+            imageio.mimsave('example.gif', frames, duration=gif_duration)         
 
     def create_frame(self, xs, ys, t) -> None:
         '''
@@ -70,5 +69,5 @@ NUM_UNITS = 4
 r = RingLayer(NUM_UNITS)
 
 # draw random doodle as example
-r.draw(activations=[[np.random.rand() for i in range(NUM_UNITS)] for a in range(100)], duration=0.05)
+r.draw(activations=[[np.random.rand() for i in range(NUM_UNITS)] for a in range(100)], draw_duration=0.05, save_gif=True)
 pass
