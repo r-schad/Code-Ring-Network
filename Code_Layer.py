@@ -6,18 +6,21 @@ class CodeLayer:
     A class implementing a code layer, organized in a ring-shape, that can take in an input, 
     and produces a sequence of activations to be passed into the ring layer.
     '''
-    def __init__(self, num_map_units: int, num_ring_units: int, num_code_units: int, code_factor: int, 
+    def __init__(self, num_map_units: int, num_ring_units: int,
+                 num_code_units: int, code_factor: int,
                  code_ring_spread: float = 0.02) -> None:
         '''
         :param num_map_units int: number of neurons in the map layer.
         :param num_ring_units int: number of neurons in the ring layer.
         :param num_code_units int: total number of neurons in the code layer.
-        :param code_factor int: the  width of the code layer strip, i.e., the number of neurons in code layer per ring neuron.
-        :param code_ring_spread float: the standard deviation of the Gaussian curve used for determining the strength
-                            of weights from Code->Ring. 
-                            Default of 0.02 will give a weight of ~0.4 to the immediate neighbors of the corresponding
-                            ring unit, and a weight of ~0.02 to the neighbors 2-steps away from the peak ring unit for a
-                            given code unit, and basically ~0.00 to all further neurons.
+        :param code_factor int: the  width of the code layer strip, 
+            i.e., the number of neurons in code layer per ring neuron.
+        :param code_ring_spread float: the standard deviation of the Gaussian curve 
+            used for determining the strength of weights from Code->Ring. 
+            Default of 0.02 will give a weight of ~0.4 to the immediate neighbors of the corresponding
+            ring unit, and a weight of ~0.02 to the neighbors 2-steps away from the peak ring unit for a
+            given code unit, and basically ~0.00 to all further neurons.
+
         :returns: None
         '''
         self.num_map_units = num_map_units
@@ -28,7 +31,6 @@ class CodeLayer:
         self.num_ring_units = num_ring_units
 
         self.weights_to_ring_from_code = self.get_gauss_ring_weights(scale=code_ring_spread)
-        
 
     def get_gauss_ring_weights(self, scale: float = 0.02):
         '''
@@ -64,7 +66,6 @@ class CodeLayer:
             cov_mat[:,i] = np.roll(weight_vals_rolled, i)
 
         # duplicate the rows onto a new axis with dimension=code_factor
-
         cov_mat_strip = np.tile(cov_mat, reps=self.code_factor)
 
         return cov_mat_strip
