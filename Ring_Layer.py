@@ -8,7 +8,7 @@ from datetime import datetime as dt
 from scipy.integrate import solve_ivp
 from scipy.stats import norm
 
-from utilities import sigmoid, COLORS, COLOR_NAMES, curvature, gaussian
+from utilities import sigmoid, COLORS, COLOR_NAMES, curvature, gaussian, exponential
 
 class RingLayer:
     '''
@@ -118,7 +118,7 @@ class RingLayer:
         self.plot_results(x_series, y_series, intersec_pts,
                           ring_inputs=input_from_code,
                           v=plot_v, u=plot_u, z=plot_z, I_prime=plot_I_prime,
-                          epoch=epoch, score=score)
+                          epoch=epoch, score=score, plot_gif=plot_gif)
 
         if plot_gif:
             self.create_gif(x_series, y_series, t_steps, intersec_pts, intersec_times, epoch)
@@ -167,7 +167,7 @@ class RingLayer:
     def plot_results(self, xs: np.array, ys: np.array, intersec_pts: np.ndarray,
                      ring_inputs: np.array, v: np.ndarray, u: np.ndarray, 
                      z: np.ndarray, I_prime: np.ndarray,
-                     epoch, score) -> None:
+                     epoch, score, plot_gif=False) -> None:
         '''
         Plots the final resulting doodle and the variable activity graph of the ring layer. 
             The plots are saved to directory: `folder_name`\\epoch.
@@ -187,6 +187,7 @@ class RingLayer:
             If not being plotted, will be [].
         :param epoch int: the current epoch
         :param score float: the score of the outputted doodle
+        :param plot_gif bool: whether to plot a GIF for each episode. This is used to determine the trial's folder structure.
 
         :returns: None
         '''
@@ -195,10 +196,15 @@ class RingLayer:
         self.plot_activity(axs[1], ring_inputs, v, u, z, I_prime)
 
         f.suptitle(f'Epoch {epoch} - Score = {np.round(score,3)}', fontsize=14)
-        if not os.path.isdir(f'{self.folder_name}\\{epoch}'):
-            os.makedirs(f'{self.folder_name}\\{epoch}')
+        if plot_gif:
+            if not os.path.isdir(f'{self.folder_name}\\{epoch}'):
+                os.makedirs(f'{self.folder_name}\\{epoch}')
+            f.savefig(f'{self.folder_name}\\{epoch}\\plot_{self.id_string}_epoch{epoch}')
+        else:
+            if not os.path.isdir(f'{self.folder_name}'):
+                os.makedir(f'{self.folder_name}')
+            f.savefig(f'{self.folder_name}\\plot_{self.id_string}_epoch{epoch}')
 
-        f.savefig(f'{self.folder_name}\\{epoch}\\plot_{self.id_string}_epoch{epoch}')
         plt.close()
 
     def plot_final_doodle(self, ax: plt.axis,
@@ -483,7 +489,7 @@ class RingLayer:
         return score, curvatures, intersec_pts, intersec_times
 
     def metric(self, t_steps: int, curvatures: list, num_intersecs: int,
-               ideal_curv: float = 5, curv_sd: float = 0.8):
+               ideal_curv: float = 2, curv_sd: float = 0.6):
         '''
         The metric based on which doodles are evaluated. Combines an average curvature score 
             with the ratio of intersection points to determine an overall quality score of a doodle.
@@ -497,8 +503,20 @@ class RingLayer:
 
         :returns score float: the combined metric score of the given doodle
         '''
-        avg_curv_scores = (1 / (t_steps - 2)) * np.sum(gaussian(curvatures, mean=ideal_curv, sd=curv_sd))
-        intersec_penalty = num_intersecs / (t_steps - 3)
-        # TODO: handle negative metric scores, also scale them down to max out at 1.
-        score = avg_curv_scores - intersec_penalty
+        avg_curv_subscore = (1 / (t_steps - 2)) * np.sum((-1 * gaussian(curvatures, mean=ideal_curv, sd=curv_sd)) + 1)
+        intersec_subscore = exponential(num_intersecs, rate=0.2, init_val=1) - 1
+        score = avg_curv_subscore + intersec_subscore
         return score
+    
+    # def curvature_subscore(self, curv, desired_curv, curv_sd):
+    #     curv_score = 1 + (-1 * np.exp(-1 * np.square((curv - desired_curv)) / 2 * (np.square(curv_sd))))
+    #     return curv_score
+
+    # def intersec_subscore(self, num_intersecs, intersec_growth):
+    #     is_score = np.exp(intersec_growth * num_intersecs) - 1
+    #     return is_score
+
+    # def metric(self, curv, num_intersecs, desired_curv, curv_sd, intersec_growth):
+    #     curv_score = curvature_subscore(curv, desired_curv, curv_sd)
+    #     is_score = intersec_subscore(num_intersecs, intersec_growth)
+    #     return curv_score + is_score
