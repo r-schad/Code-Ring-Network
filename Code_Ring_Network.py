@@ -6,7 +6,7 @@ from Ring_Layer import RingLayer
 from Code_Layer import CodeLayer
 from Duration_Layer import DurationLayer
 from Map_Layer import MapLayer
-from utilities import exponential_decay
+from utilities import exponential, sigmoid
 
 class CodeRingNetwork:
     def __init__(self, num_ring_units: int, num_code_units: int, code_factor: int, num_dur_units: int,
@@ -44,17 +44,17 @@ class CodeRingNetwork:
         for epoch in tqdm(range(num_epochs)):
             # get map activity by choosing a random winning neuron
             map_winner_idx = np.random.choice(map_size)
-            # set activity matrix to all zeros
-            map_activity = np.zeros((self.map_layer.d1, self.map_layer.d2))
-            # then turn coordinates of winner in the activity matrix into a 1
+            # then activate the neighborhood around the winner
             map_winner = self.map_layer.convert_to_coord(map_winner_idx)
-            map_activity = self.map_layer.neighborhood(map_winner)
-            weighted_map_activity = self.map_layer.weights_to_code_from_map @ map_activity.reshape(map_size, 1)
+            map_signal = self.map_layer.neighborhood(map_winner)
+            weighted_map_signal = self.map_layer.weights_to_code_from_map @ map_signal.reshape(map_size, 1)
+            map_activation = sigmoid(v=weighted_map_signal, beta=1, mu=4)
+            gradient = map_activation * (1 - map_activation)
 
             # apply random babbling signal into code layer
             code_noise = np.random.rand(self.code_layer.num_code_units, 1) * self.activity_scale
-            # get combined input into code layer by applying delta to babbling noise vs the weighted map activity
-            code_input = self.delta * code_noise + (1 - self.delta) * weighted_map_activity
+            # get combined input into code layer by applying delta to babbling noise vs the map activation
+            code_input = self.delta * code_noise + (1 - self.delta) * map_activation
            
             # determine output of code layer (input into ring layer)
             ring_input = self.code_layer.weights_to_ring_from_code @ code_input
@@ -64,15 +64,16 @@ class CodeRingNetwork:
             dur_output = self.duration_layer.activate(durations)
 
             # determine quality of the output drawing
-            doodle_score, (xs, ys) = self.ring_layer.activate(ring_input, dur_output, t_max=t_max, t_steps=t_steps, epoch=epoch, plot_gif=plot_gif)
+            doodle_score, (xs, ys) = self.ring_layer.activate(ring_input, dur_output, t_max=t_max, t_steps=t_steps, epoch=epoch, 
+                                                              plot_gif=plot_gif, vars_to_plot={'v': True, 'u': True, 'z': True, 'I_prime': False})
             
             # determine the most similar neuron to the activity of the code layer
             map_winner = self.map_layer.forward(code_input)
             # update the weights (bidirectionally, so both weight matrices M<->C) based on quality of the output
-            self.map_layer.update_weights(code_input, map_winner, doodle_score)
+            self.map_layer.update_weights(code_input, map_winner, gradient, doodle_score)
 
             # increase the influence of the map as opposed to the code babbling signal
-            self.delta = exponential_decay(epoch, decay_rate=0.02, init_val=1.0)
+            self.delta = exponential(epoch, rate=-0.02, init_val=1.0)
 
             print(f'Epoch {epoch}: {doodle_score}')
             scores += [doodle_score]
@@ -84,13 +85,22 @@ if __name__ == '__main__':
     c = 72
     cf = 2
     d = 36
-    m_d1 = 12
-    m_d2 = 12
+    m_d1 = 8
+    m_d2 = 8
     init_lr = 0.1
     init_map_sigma = 2
     initial_delta = 1.0
     num_epochs = 1000
-    crn = CodeRingNetwork(r, c, cf, d, m_d1, m_d2, init_lr, init_map_sigma, initial_delta)
-    scores = crn.train(num_epochs, 30, 300, plot_gif=True)
+    crn = CodeRingNetwork(num_ring_units=r,
+                          num_code_units=c,
+                          code_factor=2,
+                          num_dur_units=d,
+                          map_d1=m_d1, map_d2=m_d2,
+                          init_map_lr=0.1,
+                          init_map_nhood=3,
+                          activity_scale=0.2,
+                          init_delta=0.99)
+    
+    scores = crn.train(num_epochs, 30, 300, plot_gif=False)
     plt.plot(range(num_epochs), scores)
     pass

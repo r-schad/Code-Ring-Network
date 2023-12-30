@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 class MapLayer():
     def __init__(self, map_d1: int, map_d2: int, num_ring_units: int, num_code_units: int, 
-                 init_learning_rate: float, init_nhood_range: float, weight_scale: float) -> None:
+                 init_learning_rate: float, init_nhood_range: float, weight_scale: float, epsilon=0.00001) -> None:
         '''
         A class implementing a Self-Organizing Feature Map (SOFM) as the foundation of the
           Code Ring Network. 
@@ -26,6 +26,7 @@ class MapLayer():
         self.d2 = map_d2
         self.num_ring_units = num_ring_units
         self.num_code_units = num_code_units
+        self.epsilon = epsilon
 
         self.learning_rate = init_learning_rate
         self.nhood_range = init_nhood_range
@@ -83,7 +84,7 @@ class MapLayer():
         
         :returns: (i, j) coordinates of the given integer index 
         '''
-        assert isinstance(i, (int, np.integer)), 'Index must be type int' 
+        assert isinstance(i, (int, np.integer)), 'Index must be type int'
         # convert from index to coordinates
         return (i // self.d2, i % self.d2)
 
@@ -96,7 +97,7 @@ class MapLayer():
 
         :returns: integer index of the neuron
         '''
-        assert isinstance(coords, tuple), 'Coordinates must be type tuple' 
+        assert isinstance(coords, tuple), 'Coordinates must be type tuple'
         # convert from coordinates to index
         return (coords[0] * self.d2) + coords[1]
     
@@ -119,7 +120,7 @@ class MapLayer():
         nhood = np.exp(np.divide(top, bottom))
         return nhood
     
-    def update_weights(self, input_vec: np.array, winner: tuple, score: float) -> None:
+    def update_weights(self, input_vec: np.array, winner: tuple, grad: float, score: float) -> None:
         '''
         Takes in a single input vector, winning neuron, and the score of the output,
             and updates both of the model's weight matrices in-place. Uses learning_rate in the 
@@ -133,7 +134,7 @@ class MapLayer():
         '''
         input_vec = input_vec.squeeze()
         nhood_scores = self.neighborhood(winner).reshape(self.d1*self.d2,1)
-        weight_changes = (score * nhood_scores * self.learning_rate *
+        weight_changes = ((1 / (score + self.epsilon)) * nhood_scores * self.learning_rate *
                           np.subtract(self.weights_to_map_from_code, input_vec))
         self.weights_to_map_from_code += weight_changes # this updates both weight matrices
 
