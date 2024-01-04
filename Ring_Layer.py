@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import imageio
 import os
 from tqdm import tqdm
-from datetime import datetime as dt
 
 from scipy.integrate import solve_ivp
 from scipy.stats import norm
@@ -37,14 +36,6 @@ class RingLayer:
 
         :returns: None
         '''
-        self.id_string = str(dt.now()).replace(':', '').replace('.','')
-        print(f'ID string: {self.id_string}')
-        if not os.path.isdir('output'):
-            os.mkdir('output')
-
-        self.folder_name = f'output\\{self.id_string}'
-        os.mkdir(self.folder_name)
-
         self.num_ring_units = num_ring_units
         self.tau=tau
         self.lambda_=lambda_
@@ -61,9 +52,9 @@ class RingLayer:
         self.headings = np.array([[np.cos(dir), np.sin(dir)] for dir in self.directions])
     
     def activate(self, input_from_code: np.ndarray, dur_outputs: np.ndarray,
-                 t_max: int, t_steps: int, epoch: int,
+                 t_max: int, t_steps: int, folder_name: str, epoch: int,
                  vars_to_plot: dict = {'v':False,'u':False,'z':True,'I_prime':False},
-                 plot_gif=False) -> float:
+                 plot_gif: bool = False) -> float:
         '''
         Applies the outputs of the code and duration layers into the ring layer to determine outputs of the ring layer.
 
@@ -73,6 +64,7 @@ class RingLayer:
             dur_outputs determine the duration that each ring neuron is activated
         :param t_max int: the maximum timestep to integrate to
         :param t_steps int: the number of timesteps to integrate over from [0, t_max]
+        :param folder_name str: the model instance's corresponding folder name
         :param epoch int: the current epoch
         :param vars_to_plot dict: which of the 4 series should be plotted (v, u, z, I_prime)
             keys=the four series listed above, 
@@ -108,7 +100,7 @@ class RingLayer:
         x_series, y_series = self.create_drawing(z_series, t_steps)
 
         # evaluate drawing
-        score, curvatures, intersec_pts, intersec_times = self.evaluate(x_series, y_series, t_steps, ideal_curv=5.0, curv_sd=0.8)
+        score, curvatures, intersec_pts, intersec_times = self.evaluate(x_series, y_series, t_steps, ideal_curv=2.0, curv_sd=0.6) # FIXME: make these a variable
 
         # plot variables over time
         plot_v = v_series if vars_to_plot['v'] else []
@@ -118,7 +110,7 @@ class RingLayer:
         self.plot_results(x_series, y_series, intersec_pts,
                           ring_inputs=input_from_code,
                           v=plot_v, u=plot_u, z=plot_z, I_prime=plot_I_prime,
-                          epoch=epoch, score=score, plot_gif=plot_gif)
+                          folder_name=folder_name, epoch=epoch, score=score, plot_gif=plot_gif)
 
         if plot_gif:
             self.create_gif(x_series, y_series, t_steps, intersec_pts, intersec_times, epoch)
@@ -165,12 +157,12 @@ class RingLayer:
         return (x_series_with_momentum, y_series_with_momentum)
     
     def plot_results(self, xs: np.array, ys: np.array, intersec_pts: np.ndarray,
-                     ring_inputs: np.array, v: np.ndarray, u: np.ndarray, 
+                     ring_inputs: np.array, v: np.ndarray, u: np.ndarray,
                      z: np.ndarray, I_prime: np.ndarray,
-                     epoch, score, plot_gif=False) -> None:
+                     folder_name: str, epoch: int, score: float, plot_gif=False) -> None:
         '''
         Plots the final resulting doodle and the variable activity graph of the ring layer. 
-            The plots are saved to directory: `folder_name`\\epoch.
+            The plots are saved to directory: `folder_name`\\`epoch`.
         
         :param xs np.array: array of x-coordinates over time
         :param ys np.array: array of y-coordinates over time
@@ -185,31 +177,34 @@ class RingLayer:
             If not being plotted, will be [].        
         :param I_prime np.ndarray: array of shape (num_ring_neurons, t_steps) of the series of I_prime (resource) values of the ring layer. 
             If not being plotted, will be [].
+        :param folder_name str: the model instance's corresponding folder name
         :param epoch int: the current epoch
         :param score float: the score of the outputted doodle
         :param plot_gif bool: whether to plot a GIF for each episode. This is used to determine the trial's folder structure.
 
         :returns: None
         '''
+        id_string = folder_name.split('\\')[-1]
         f, axs = plt.subplots(1, 2)
         self.plot_final_doodle(axs[0], xs, ys, intersec_pts)
         self.plot_activity(axs[1], ring_inputs, v, u, z, I_prime)
 
         f.suptitle(f'Epoch {epoch} - Score = {np.round(score,3)}', fontsize=14)
         if plot_gif:
-            if not os.path.isdir(f'{self.folder_name}\\{epoch}'):
-                os.makedirs(f'{self.folder_name}\\{epoch}')
-            f.savefig(f'{self.folder_name}\\{epoch}\\plot_{self.id_string}_epoch{epoch}')
+            if not os.path.isdir(f'{folder_name}\\{epoch}'):
+                os.makedirs(f'{folder_name}\\{epoch}')
+            f.savefig(f'{folder_name}\\{epoch}\\plot_{id_string}_epoch{epoch}')
         else:
-            if not os.path.isdir(f'{self.folder_name}'):
-                os.makedir(f'{self.folder_name}')
-            f.savefig(f'{self.folder_name}\\plot_{self.id_string}_epoch{epoch}')
+            if not os.path.isdir(f'{folder_name}'):
+                os.mkdir(f'{folder_name}')
+            f.savefig(f'{folder_name}\\plot_{id_string}_epoch{epoch}')
 
         plt.close()
 
     def plot_final_doodle(self, ax: plt.axis,
                           xs: np.array, ys: np.array,
-                          intersec_pts: np.ndarray) -> None:
+                          intersec_pts: np.ndarray,
+                          individualize_plot: bool = True) -> None:
         '''
         Plots the final doodle.
 
@@ -218,24 +213,29 @@ class RingLayer:
         :param ys np.array: array of y-coordinates over time
         :param intersec_pts np.ndarray: array of shape (t_steps, 2) with 
             the [x, y] coordinates of each intersection point of the doodle
+        :param individualize_plot bool: whether the plot should be individualized to fit
+            that specific doodle's range of outputs, include legend, etc. This should be 
+            True for most cases, but False when using CodeRingNetwork.show_results().
 
         :returns: None
         '''
         # plot lines
         ax.plot(xs, ys, alpha=0.5, c='black')
-        # plot final pen point
-        ax.scatter(xs[-1], ys[-1], alpha=0.8, marker = 'o', c='black', label='Final Point')
+
         # plot all intersection points (if any)
         if intersec_pts.any():
             ax.scatter(intersec_pts[:,0], intersec_pts[:,1], color='red', marker='o', label='Intersections')
 
-        # organize plot
-        ax.set_xlim([-1 * np.max(np.abs([xs, ys])), np.max(np.abs([xs, ys]))])
-        ax.set_xlabel('x', fontsize = 14)
-        ax.set_ylim([-1 * np.max(np.abs([xs, ys])), np.max(np.abs([xs, ys]))])
-        ax.set_ylabel('y', fontsize = 14)
-        ax.set_title('Final Output')
-        ax.legend()
+        if individualize_plot:
+            # plot final pen point
+            ax.scatter(xs[-1], ys[-1], alpha=0.8, marker = 'o', c='black', label='Final Point')
+            # organize plot
+            ax.set_xlim([-1 * np.max(np.abs([xs, ys])), np.max(np.abs([xs, ys]))])
+            ax.set_xlabel('x', fontsize = 14)
+            ax.set_ylim([-1 * np.max(np.abs([xs, ys])), np.max(np.abs([xs, ys]))])
+            ax.set_ylabel('y', fontsize = 14)
+            ax.set_title('Final Output')
+            ax.legend()
 
     def plot_activity(self, ax: plt.axis,
                       ring_inputs: np.ndarray, v: np.ndarray = [], u: np.ndarray = [],
@@ -287,7 +287,7 @@ class RingLayer:
             Then, we can handle the change in v, u, and I' separately, 
             and concat them back together to be returned as the new state.
 
-        :param t np.ndarray: array of the timestep values to integrate over #TODO: is this true or is it individual values
+        :param t np.ndarray: array of the timestep values to integrate over
             (per solve_ivp() documentation, t is a necessary parameter for the function being applied to solve_ivp().
             but should not be used in the function)
         :param code_values np.ndarray: input values provided by the code layer
@@ -418,8 +418,8 @@ class RingLayer:
         ax.legend()
 
     def create_gif(self, x_series: np.array, y_series: np.array, t_steps: int,
-                   intersec_pts: np.ndarray, intersec_times: np.ndarray, epoch: int,
-                   pen_color: str = 'black') -> None:
+                   intersec_pts: np.ndarray, intersec_times: np.ndarray,  folder_name: str,
+                   epoch: int, pen_color: str = 'black') -> None:
         '''
         Creates a GIF video of the doodling process, with intersection points showing in red.
             The GIF is saved in `folder_name`\\`epoch`.
@@ -429,6 +429,7 @@ class RingLayer:
         :param t_steps int: number of values of `t` over which the model will be integrated
         :param intersec_pts np.ndarray: array of all intersection points encountered before timestep `t`
         :param intersec_times np.ndarray: array of times before `t` where an intersection occurred
+        :param folder_name str: the model instance's corresponding folder name
         :param epoch int: the current epoch
         :param pen_color string: pyplot string for color of the pen on the plot
 
@@ -437,8 +438,10 @@ class RingLayer:
         # TODO: we very occassionally still get random dots showing up on y=x. Doesn't seem like
         # TODO: they're taken into account for metric scoring though, but not 100% sure.
         # create directories
-        if not os.path.isdir(f'{self.folder_name}\\{epoch}\\img'):
-            os.makedirs(f'{self.folder_name}\\{epoch}\\img')
+        if not os.path.isdir(f'{folder_name}\\{epoch}\\img'):
+            os.makedirs(f'{folder_name}\\{epoch}\\img')
+
+        id_string = folder_name.split('\\')[-1]
 
         frames = []
         print('Creating GIF...')
@@ -447,17 +450,17 @@ class RingLayer:
 
             self.create_frame(x_series, y_series, t, epoch, ax, pen_color, intersec_pts=intersec_pts, intersec_times=intersec_times)
             
-            f.savefig(f'{self.folder_name}\\{epoch}\\img\\img_{t}.png')
+            f.savefig(f'{folder_name}\\{epoch}\\img\\img_{t}.png')
             plt.close()
-            image = imageio.v2.imread(f'{self.folder_name}\\{epoch}\\img\\img_{t}.png')
+            image = imageio.v2.imread(f'{folder_name}\\{epoch}\\img\\img_{t}.png')
             frames.append(image)
 
         # duration is 1/100th seconds, per frame
         # TODO: get desired GIF durations to work
-        imageio.mimsave(f"{self.folder_name}\\{epoch}\\GIF_{self.id_string}.gif", frames, **{'duration':2.5})
+        imageio.mimsave(f"{folder_name}\\{epoch}\\GIF_{id_string}.gif", frames, **{'duration':2.5})
 
     def evaluate(self, x_series: np.ndarray, y_series: np.ndarray, t_steps: int,
-                 ideal_curv: float = 5, curv_sd: float = 0.8) -> tuple[float, list, np.ndarray, np.array]:
+                 ideal_curv: float = 2, curv_sd: float = 0.6, intersec_growth: float = 0.2) -> tuple[float, list, np.ndarray, np.array]:
         '''
         Gets the intersection points, curvature values, and total metric score of a doodle,
             and returns the 4-tuple of score, curvatures, intersection points, intersection times.
@@ -468,6 +471,7 @@ class RingLayer:
         :param ideal_curv float: the ideal curvature based on which to evaluate the doodle
         :param curv_sd float: the standard deviation of the curvature Gaussian curve 
             used to evaluate the doodle
+        :param intersec_growth float: the exponential growth rate of the intersection penalty
 
         :returns (score: float, curvatures: list, intersec_pts: np.ndarray, intersec_times: np.array)
         '''
@@ -476,7 +480,7 @@ class RingLayer:
         intersec_pts = np.ndarray((0,2))
         intersec_times = np.array([])
         # must have at least 4 points for intersections, so start at index 3
-        for t_cur in tqdm(range(3, t_steps, 1)):
+        for t_cur in range(3, t_steps, 1):
             new_intersec, intersec_t = self.detect_intersection(x_series, y_series, t_cur)
             if intersec_t:
                 intersec_pts = np.concatenate((intersec_pts, new_intersec), axis=0)
@@ -485,11 +489,11 @@ class RingLayer:
             curvatures += [curvature(x1=x_series[t_cur-2], y1=y_series[t_cur-2],
                                         x2=x_series[t_cur-1], y2=y_series[t_cur-1],
                                         x3=x_series[t_cur], y3=y_series[t_cur])]
-        score = self.metric(t_steps, np.array(curvatures), len(intersec_times), ideal_curv=ideal_curv, curv_sd=curv_sd)
+        score = self.metric(t_steps, np.array(curvatures), len(intersec_times), ideal_curv=ideal_curv, curv_sd=curv_sd, intersec_growth=intersec_growth)
         return score, curvatures, intersec_pts, intersec_times
 
     def metric(self, t_steps: int, curvatures: list, num_intersecs: int,
-               ideal_curv: float = 2, curv_sd: float = 0.6):
+               ideal_curv: float = 2, curv_sd: float = 0.6, intersec_growth: float = 0.2):
         '''
         The metric based on which doodles are evaluated. Combines an average curvature score 
             with the ratio of intersection points to determine an overall quality score of a doodle.
@@ -500,23 +504,11 @@ class RingLayer:
         :param ideal_curv float: the desired curvature for each line segment of the doodle. This serves
             as the center of the Gaussian curve.
         :param curv_sd float: the standard deviation of the curvature Gaussian curve
-
+        :param intersec_growth float: the exponential growth rate of the intersection penalty
+        
         :returns score float: the combined metric score of the given doodle
         '''
-        avg_curv_subscore = (1 / (t_steps - 2)) * np.sum((-1 * gaussian(curvatures, mean=ideal_curv, sd=curv_sd)) + 1)
-        intersec_subscore = exponential(num_intersecs, rate=0.2, init_val=1) - 1
+        avg_curv_subscore = (1 / (t_steps - 3)) * np.sum((-1 * gaussian(curvatures, mean=ideal_curv, sd=curv_sd)) + 1)
+        intersec_subscore = exponential(num_intersecs, rate=intersec_growth, init_val=1) - 1
         score = avg_curv_subscore + intersec_subscore
         return score
-    
-    # def curvature_subscore(self, curv, desired_curv, curv_sd):
-    #     curv_score = 1 + (-1 * np.exp(-1 * np.square((curv - desired_curv)) / 2 * (np.square(curv_sd))))
-    #     return curv_score
-
-    # def intersec_subscore(self, num_intersecs, intersec_growth):
-    #     is_score = np.exp(intersec_growth * num_intersecs) - 1
-    #     return is_score
-
-    # def metric(self, curv, num_intersecs, desired_curv, curv_sd, intersec_growth):
-    #     curv_score = curvature_subscore(curv, desired_curv, curv_sd)
-    #     is_score = intersec_subscore(num_intersecs, intersec_growth)
-    #     return curv_score + is_score
