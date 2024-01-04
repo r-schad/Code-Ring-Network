@@ -33,7 +33,7 @@ class MapLayer():
         self.neurons = np.array([[[i,j] for j in range(self.d1)] for i in range(self.d2)])
         self.dist_arrays = self.get_distances_for_all_neurons()
         self.weights_to_code_from_map = np.random.rand(num_code_units, int(map_d1*map_d2)) * weight_scale
-        # define a `view`` of original array - they point to same memory - between W_CM and W_MC
+        # defines a `view`` of original array - they point to same memory - between W_CM and W_MC
         self.weights_to_map_from_code = self.weights_to_code_from_map.T
 
     def get_distances_for_all_neurons(self) -> np.ndarray:
@@ -120,7 +120,7 @@ class MapLayer():
         nhood = np.exp(np.divide(top, bottom))
         return nhood
     
-    def update_weights(self, input_vec: np.array, winner: tuple, grad: float, score: float) -> None:
+    def update_weights(self, input_vec: np.array, winner: tuple, score: float) -> None:
         '''
         Takes in a single input vector, winning neuron, and the score of the output,
             and updates both of the model's weight matrices in-place. Uses learning_rate in the 
@@ -132,11 +132,11 @@ class MapLayer():
 
         :returns: None
         '''
-        input_vec = input_vec.squeeze()
-        nhood_scores = self.neighborhood(winner).reshape(self.d1*self.d2,1)
-        weight_changes = ((1 / (score + self.epsilon)) * nhood_scores * self.learning_rate *
-                          np.subtract(self.weights_to_map_from_code, input_vec))
-        self.weights_to_map_from_code += weight_changes # this updates both weight matrices
+        nhood_scores = self.neighborhood(winner).reshape(self.d1*self.d2)
+        weight_changes = ((1 / (score + self.epsilon)) * self.learning_rate *
+                          np.subtract(input_vec, self.weights_to_code_from_map)) * nhood_scores
+
+        self.weights_to_code_from_map += weight_changes # this updates both weight matrices
 
     def forward(self, code_activity: np.array) -> tuple:
         '''
@@ -154,31 +154,3 @@ class MapLayer():
         winner_coords = self.convert_to_coord(winner_index)
 
         return winner_coords
-    
-    # def visualize_weights(self, filename): # TODO: we'll need this
-    #     '''
-    #     Given a filename, plots the weights of all neurons in the SOFM in a grid of shape (self.d1, self.d2).
-
-    #     NOTE: Due to the sheer amount of data to plot, 
-    #     this function takes a very significant amount of time to complete (up to an hour).
-    #     '''
-    #     print('Creating neuron visualization plot...')
-    #     try:
-    #         fig, axs = plt.subplots(self.d1, self.d2, figsize=(self.d1,self.d2), sharex=True, sharey=True)
-    #     except NotImplementedError:
-    #         fig, axs = plt.subplots(self.d1, self.d2, figsize=(self.d1,self.d2), sharex=True, sharey=True)
-
-    #     for r in range(self.d1):
-    #         print(f'{round(100 * r / self.d1)}%', end='\r')
-    #         for c in range(self.d2):
-    #             i = self.convert_to_index((r,c))
-    #             ax = axs[r][c]
-
-    #             # plot image on subplot
-    #             ax.imshow(self.weights[i].reshape(self.image_dims[0], self.image_dims[1]), cmap='gray', vmin=0, vmax=1)
-                
-    #             ax.set_xbound([0,self.image_dims[1]])
-
-    #     plt.tight_layout()
-    #     fig.savefig(filename)
-    #     plt.close()
