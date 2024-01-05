@@ -56,7 +56,7 @@ class RingLayer:
     def activate(self, input_from_code: np.ndarray, dur_outputs: np.ndarray,
                  t_max: int, t_steps: int, folder_name: str, epoch: int,
                  vars_to_plot: dict = {'v':False,'u':False,'z':True,'I_prime':False},
-                 plot_gif: bool = False) -> float:
+                 plot_results: bool = True, plot_gif: bool = False) -> float:
         '''
         Applies the outputs of the code and duration layers into the ring layer to determine outputs of the ring layer.
 
@@ -71,6 +71,7 @@ class RingLayer:
         :param vars_to_plot dict: which of the 4 series should be plotted (v, u, z, I_prime)
             keys=the four series listed above, 
             values=bool indicating if each corresponding series should be plotted
+        :param plot_results bool: whether a plot of the results should be created
         :param plot_gif bool: whether a GIF should be created of the drawing
 
         :returns score float: the metric score of the outputted drawing based on the metric function.
@@ -109,15 +110,16 @@ class RingLayer:
         plot_u = u_series if vars_to_plot['u'] else []
         plot_z = z_series if vars_to_plot['z'] else []
         plot_I_prime = I_prime_series if vars_to_plot['I_prime'] else []
-        self.plot_results(x_series, y_series, intersec_pts,
+        if plot_results: 
+            self.plot_results(x_series, y_series, intersec_pts,
                           ring_inputs=input_from_code,
                           v=plot_v, u=plot_u, z=plot_z, I_prime=plot_I_prime,
                           folder_name=folder_name, epoch=epoch, score=score, plot_gif=plot_gif)
 
         if plot_gif:
-            self.create_gif(x_series, y_series, t_steps, intersec_pts, intersec_times, epoch)
+            self.create_gif(x_series, y_series, t_steps, intersec_pts, intersec_times, folder_name, epoch)
 
-        return (score, (x_series, y_series))
+        return (score, (x_series, y_series), intersec_pts)
 
     def create_drawing(self, z_series: np.ndarray, t_steps: int) -> tuple:
         '''
@@ -224,10 +226,6 @@ class RingLayer:
         # plot lines
         ax.plot(xs, ys, alpha=0.5, c='black')
 
-        # plot all intersection points (if any)
-        if intersec_pts.any():
-            ax.scatter(intersec_pts[:,0], intersec_pts[:,1], color='red', marker='o', label='Intersections')
-
         if individualize_plot:
             # plot final pen point
             ax.scatter(xs[-1], ys[-1], alpha=0.8, marker = 'o', c='black', label='Final Point')
@@ -238,6 +236,16 @@ class RingLayer:
             ax.set_ylabel('y', fontsize = 14)
             ax.set_title('Final Output')
             ax.legend()
+            intersec_point_size = 20
+            
+        else:
+            intersec_point_size = 4
+
+        # plot all intersection points (if any)
+        if intersec_pts.any():
+            ax.scatter(intersec_pts[:,0], intersec_pts[:,1], 
+                       color='red', marker='o', s=intersec_point_size, 
+                       label='Intersections')
 
     def plot_activity(self, ax: plt.axis,
                       ring_inputs: np.ndarray, v: np.ndarray = [], u: np.ndarray = [],

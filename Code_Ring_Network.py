@@ -108,9 +108,10 @@ class CodeRingNetwork:
             dur_output = self.duration_layer.activate(durations)
 
             # determine quality of the output drawing
-            doodle_score, (xs, ys) = self.ring_layer.activate(ring_input, dur_output, t_max=t_max, t_steps=t_steps,
+            doodle_score, (_xs, _ys), _intersec_pts = self.ring_layer.activate(ring_input, dur_output, t_max=t_max, t_steps=t_steps,
                                                               folder_name=self.folder_name, epoch=epoch,
-                                                              plot_gif=plot_gif, vars_to_plot={'v': False, 'u': False, 'z': True, 'I_prime': False})
+                                                              plot_results=True, plot_gif=plot_gif, 
+                                                              vars_to_plot={'v': False, 'u': False, 'z': True, 'I_prime': False})
             
             # determine the most similar neuron to the activity of the code layer
             map_winner = self.map_layer.forward(code_input)
@@ -129,7 +130,7 @@ class CodeRingNetwork:
 
         return scores
     
-    def show_results(self, filename, durations: float, t_max: int, t_steps: int) -> None:
+    def show_map_results(self, filename, durations: float, t_max: int, t_steps: int) -> None:
         '''
         Saves the outputted drawing from each map neuron in one overall figure.
 
@@ -140,7 +141,7 @@ class CodeRingNetwork:
 
         :returns: None
         '''
-        print('Saving Results Plot')
+        print('Saving Map Results Plot')
         map_size = self.map_layer.d1 * self.map_layer.d2
         fig, axs = plt.subplots(self.map_layer.d1, self.map_layer.d2, figsize=(self.map_layer.d1,self.map_layer.d2), sharex=True, sharey=True)
 
@@ -159,12 +160,13 @@ class CodeRingNetwork:
             dur_output = self.duration_layer.activate(durations)
 
             # determine quality of the output drawing
-            doodle_score, (xs, ys) = self.ring_layer.activate(ring_input, dur_output, t_max=t_max, t_steps=t_steps,
+            doodle_score, (xs, ys), intersec_pts = self.ring_layer.activate(ring_input, dur_output, t_max=t_max, t_steps=t_steps,
                                                               folder_name=self.folder_name, epoch=-1,
-                                                              plot_gif=False, vars_to_plot={'v': False, 'u': False, 'z': False, 'I_prime': False})
+                                                              plot_results=False, plot_gif=False, 
+                                                              vars_to_plot={'v': False, 'u': False, 'z': False, 'I_prime': False})
             
             # generate drawing for current neuron
-            self.ring_layer.plot_final_doodle(ax=axs[r][c], xs=xs, ys=ys, intersec_pts=np.array([]), individualize_plot=False)
+            self.ring_layer.plot_final_doodle(ax=axs[r][c], xs=xs, ys=ys, intersec_pts=intersec_pts, individualize_plot=False)
             axs[r][c].set_xlabel(f'{np.round(doodle_score,3)}')
             activity_matrix[r, c] = 0.0
 
@@ -188,7 +190,7 @@ if __name__ == '__main__':
     num_epochs = 500
     t_max = 30
     t_steps = 300
-    activity_scale = 1.0
+    activity_scale = 0.5
     crn = CodeRingNetwork(num_ring_units=r,
                           num_code_units=c,
                           code_factor=cf,
@@ -203,9 +205,9 @@ if __name__ == '__main__':
 
     sigmoid_mu = np.mean(crn.map_layer.neighborhood((0,0)) * crn.map_layer.d1 * crn.map_layer.d2) * activity_scale
 
-    # crn.show_results(f'{crn.folder_name}\\initial_outputs_{id_string}.png', durs, t_max, t_steps)
+    crn.show_map_results(f'{crn.folder_name}\\initial_outputs_{id_string}.png', durs, t_max, t_steps)
     scores = crn.train(num_epochs, durs, t_max, t_steps, plot_gif=False)
-    crn.show_results(f'{crn.folder_name}\\final_outputs_{id_string}.png', durs, t_max, t_steps)
+    crn.show_map_results(f'{crn.folder_name}\\final_outputs_{id_string}.png', durs, t_max, t_steps)
     plt.plot(range(num_epochs), scores)
     plt.title(f'Scores Over Time {id_string}')
     plt.savefig(f'{crn.folder_name}\\all_scores_{id_string}.png')
