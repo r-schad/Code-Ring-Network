@@ -7,7 +7,7 @@ from tqdm import tqdm
 from scipy.integrate import solve_ivp
 from scipy.stats import norm
 
-from utilities import sigmoid, COLORS, COLOR_NAMES, curvature, gaussian, exponential
+from utilities import sigmoid, get_color_range, curvature, gaussian, exponential
 
 class RingLayer:
     '''
@@ -21,7 +21,7 @@ class RingLayer:
                  beta: float = 50.0, mu: float = 0.1, # output sigmoid transform
                  epsilon: float = 0.00001) -> None:
         '''
-        :param num_ring_units int: number of neurons in ring layer
+        :param num_ring_units int: 3
         # TODO: describe each parameter's function in the model
         :param tau float:
         :param lambda_ float:
@@ -50,6 +50,8 @@ class RingLayer:
 
         self.directions = np.array([np.deg2rad(i * 360 / self.num_ring_units) for i in range(self.num_ring_units)]) # radians
         self.headings = np.array([[np.cos(dir), np.sin(dir)] for dir in self.directions])
+
+        self.COLOR_RANGE = get_color_range(num_ring_units, map_name='hsv')
     
     def activate(self, input_from_code: np.ndarray, dur_outputs: np.ndarray,
                  t_max: int, t_steps: int, folder_name: str, epoch: int,
@@ -257,9 +259,10 @@ class RingLayer:
 
         :returns: None
         '''
-        # TODO: fix this so code units corresponding to same ring unit are same color (also use gradient ring for color scheme?)
-        for i in np.argsort(ring_inputs):
-            color = COLORS[i % len(COLORS)]
+        # include 8 most active ring neurons in legend
+        sorted_inputs = np.flip(np.argsort(ring_inputs))
+        for i in sorted_inputs[:8]:
+            color = self.COLOR_RANGE[i]
             if np.any(v):
                 plt.plot(v[i], label=f'v_{i}', c=color, linestyle='dashed')
             if np.any(u):
@@ -268,11 +271,25 @@ class RingLayer:
                 plt.plot(I_prime[i], label=f"I'_{i}", c=color, linestyle='dashdot')
             if np.any(z):
                 plt.plot(z[i], label=f'z_{i}', c=color, linestyle='solid')
-            plt.axhline(y=0.0, c="black", linewidth=0.05)
+        
+        # add '_' to beginning of these labels in the legend so they're ignored
+        # we want to ignore the later half of inputs for visual clarity so legend isn't too big
+        for i in sorted_inputs[8:]:
+            color = self.COLOR_RANGE[i]
+            if np.any(v):
+                plt.plot(v[i], label=f'_v_{i}', c=color, linestyle='dashed')
+            if np.any(u):
+                plt.plot(u[i], label=f'_u_{i}', c=color, linestyle='dotted')
+            if np.any(I_prime):
+                plt.plot(I_prime[i], label=f"_I'_{i}", c=color, linestyle='dashdot')
+            if np.any(z):
+                plt.plot(z[i], label=f'_z_{i}', c=color, linestyle='solid')
 
+        ax.legend(loc='upper right')
         ax.set_ylim([0, 1])
         ax.set_xlabel('t')
         ax.set_title('Variable Plots')
+        plt.axhline(y=0.0, c="black", linewidth=0.05)
     
     def doodle(self, t: np.ndarray, code_values: np.ndarray,
                dur_values: np.ndarray, state: np.ndarray) -> np.ndarray:
@@ -505,7 +522,7 @@ class RingLayer:
             as the center of the Gaussian curve.
         :param curv_sd float: the standard deviation of the curvature Gaussian curve
         :param intersec_growth float: the exponential growth rate of the intersection penalty
-        
+
         :returns score float: the combined metric score of the given doodle
         '''
         avg_curv_subscore = (1 / (t_steps - 3)) * np.sum((-1 * gaussian(curvatures, mean=ideal_curv, sd=curv_sd)) + 1)
