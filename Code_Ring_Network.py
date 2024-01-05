@@ -56,7 +56,7 @@ class CodeRingNetwork:
         self.ring_layer = RingLayer(num_ring_units)
         self.code_layer = CodeLayer(num_map_units=(map_d1*map_d2), num_ring_units=num_ring_units,
                                     num_code_units=num_code_units, code_factor=code_factor,
-                                    code_ring_spread=0.00001)
+                                    code_ring_spread=0.02)
         self.duration_layer = DurationLayer(num_dur_units, (map_d1*map_d2))
         self.map_layer = MapLayer(map_d1, map_d2, num_ring_units, num_code_units,
                                   init_map_lr, init_map_nhood, weight_scale=activity_scale)
@@ -114,11 +114,15 @@ class CodeRingNetwork:
             
             # determine the most similar neuron to the activity of the code layer
             map_winner = self.map_layer.forward(code_input)
+
             # update the weights (bidirectionally, so both weight matrices M<->C) based on quality of the output
             self.map_layer.update_weights(code_input, map_winner, doodle_score)
 
+            # decrease the neighborhood range
+            self.map_layer.nhood_range = exponential(epoch, -0.002, self.map_layer.init_nhood_range) # TODO: parameterize decay rate
+
             # decrease the influence of the code babbling signal
-            self.delta = exponential(epoch, rate=-0.002, init_val=self.init_delta)
+            self.delta = exponential(epoch, rate=-0.002, init_val=self.init_delta) # TODO: parameterize decay rate
 
             print(f'Epoch {epoch}: {doodle_score}')
             scores += [doodle_score]
@@ -172,13 +176,13 @@ class CodeRingNetwork:
     
 if __name__ == '__main__':
     r = 36
-    cf = 2
+    cf = 1
     c = cf*r
     d = 36
     durs = 0.2
     m_d1 = 8
     m_d2 = 8
-    init_lr = 0.2
+    init_lr = 0.05
     init_map_sigma = 2
     initial_delta = 0.8
     num_epochs = 500
@@ -199,9 +203,9 @@ if __name__ == '__main__':
 
     sigmoid_mu = np.mean(crn.map_layer.neighborhood((0,0)) * crn.map_layer.d1 * crn.map_layer.d2) * activity_scale
 
-    crn.show_results(f'{crn.folder_name}\\initial_outputs_{id_string}.png', durs, t_max, t_steps, sigmoid_beta=1, sigmoid_mu=sigmoid_mu)
-    scores = crn.train(num_epochs, durs, t_max, t_steps, sigmoid_beta=1, sigmoid_mu=sigmoid_mu, plot_gif=False)
-    crn.show_results(f'{crn.folder_name}\\final_outputs_{id_string}.png', durs, t_max, t_steps, sigmoid_beta=1, sigmoid_mu=sigmoid_mu)
+    # crn.show_results(f'{crn.folder_name}\\initial_outputs_{id_string}.png', durs, t_max, t_steps)
+    scores = crn.train(num_epochs, durs, t_max, t_steps, plot_gif=False)
+    crn.show_results(f'{crn.folder_name}\\final_outputs_{id_string}.png', durs, t_max, t_steps)
     plt.plot(range(num_epochs), scores)
     plt.title(f'Scores Over Time {id_string}')
     plt.savefig(f'{crn.folder_name}\\all_scores_{id_string}.png')

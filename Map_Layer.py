@@ -29,6 +29,7 @@ class MapLayer():
         self.epsilon = epsilon
 
         self.learning_rate = init_learning_rate
+        self.init_nhood_range = init_nhood_range
         self.nhood_range = init_nhood_range
         self.neurons = np.array([[[i,j] for j in range(self.d1)] for i in range(self.d2)])
         self.dist_arrays = self.get_distances_for_all_neurons()
@@ -132,11 +133,11 @@ class MapLayer():
 
         :returns: None
         '''
-        nhood_scores = self.neighborhood(winner).reshape(self.d1*self.d2)
-        weight_changes = ((1 / (score + self.epsilon)) * self.learning_rate *
-                          np.subtract(input_vec, self.weights_to_code_from_map)) * nhood_scores
+        nhood_scores = self.neighborhood(winner).reshape(self.d1*self.d2, 1)
+        weight_changes = ((1 / (score + self.epsilon)) * nhood_scores * self.learning_rate *
+                          np.subtract(self.weights_to_map_from_code, input_vec.T))
 
-        self.weights_to_code_from_map += weight_changes # this updates both weight matrices
+        self.weights_to_map_from_code += weight_changes # this updates both weight matrices
 
     def forward(self, code_activity: np.array) -> tuple:
         '''
@@ -148,7 +149,7 @@ class MapLayer():
         :returns winner_coords tuple: the (i, j) coordinates of the winning neuron
         '''
         # TODO: do we need to reshape here?
-        weights_reshaped = self.weights_to_code_from_map.reshape(self.num_code_units, self.d1*self.d2)
+        weights_reshaped = self.weights_to_code_from_map
         norms = np.linalg.norm(weights_reshaped - code_activity, axis=0)
         winner_index = int(np.argmin(norms))
         winner_coords = self.convert_to_coord(winner_index)
