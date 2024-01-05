@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
 
 def sigmoid(v: (float, np.ndarray), beta: float = 50.0, mu: float = 0.1) -> (float, np.ndarray):
     '''
@@ -103,3 +104,7 @@ def curvature(x1: float, y1: float, x2: float, y2: float, x3: float, y3: float) 
 # Define all colors to be used
 COLOR_NAMES = [k.replace('tab:', '') for k in mcolors.TABLEAU_COLORS.keys()]
 COLORS = list(mcolors.TABLEAU_COLORS.values())
+def get_color_range(num_colors, map_name='hsv'):
+    cmap = plt.get_cmap(map_name, num_colors)
+    color_range = cmap(np.arange(0,num_colors))
+    return color_range
