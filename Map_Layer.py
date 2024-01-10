@@ -2,8 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 class MapLayer():
-    def __init__(self, map_d1: int, map_d2: int, num_ring_units: int, num_code_units: int, 
-                 init_learning_rate: float, init_nhood_range: float, weight_scale: float, epsilon=0.00001) -> None:
+    def __init__(self, map_d1: int, map_d2: int, num_ring_units: int, num_code_units: int,
+                 init_learning_rate: float, init_nhood_range: float, nhood_decay: float,
+                 weight_min: float, weight_max: float, epsilon=0.00001) -> None:
         '''
         A class implementing a Self-Organizing Feature Map (SOFM) as the foundation of the
           Code Ring Network. 
@@ -31,10 +32,11 @@ class MapLayer():
         self.learning_rate = init_learning_rate
         self.init_nhood_range = init_nhood_range
         self.nhood_range = init_nhood_range
+        self.nhood_decay = nhood_decay
         self.neurons = np.array([[[i,j] for j in range(self.d1)] for i in range(self.d2)])
         self.dist_arrays = self.get_distances_for_all_neurons()
-        self.weights_to_code_from_map = np.random.rand(num_code_units, int(map_d1*map_d2)) * weight_scale
-        # defines a `view`` of original array - they point to same memory - between W_CM and W_MC
+        self.weights_to_code_from_map = np.random.uniform(low=weight_min, high=weight_max, size=(num_code_units, int(map_d1*map_d2)))
+        # defines a `view` of original array - they point to same memory - between W_CM and W_MC
         self.weights_to_map_from_code = self.weights_to_code_from_map.T
 
     def get_distances_for_all_neurons(self) -> np.ndarray:
@@ -134,9 +136,11 @@ class MapLayer():
         :returns: None
         '''
         nhood_scores = self.neighborhood(winner).reshape(self.d1*self.d2, 1)
-        weight_changes = ((1 / (score + self.epsilon)) * nhood_scores * self.learning_rate *
+        effective_lr = self.learning_rate * (1 - score)
+        weight_changes = (nhood_scores * effective_lr *
                           np.subtract(self.weights_to_map_from_code, input_vec.T))
-
+        if np.max(weight_changes) > 0.5:
+            pass
         self.weights_to_map_from_code += weight_changes # this updates both weight matrices
 
     def forward(self, code_activity: np.array) -> tuple:

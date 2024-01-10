@@ -101,6 +101,13 @@ def curvature(x1: float, y1: float, x2: float, y2: float, x3: float, y3: float) 
     )
     return curv
 
+def write_params(filename, **kwargs):
+    with open(filename, 'w') as f:
+        for var, val in kwargs.items():
+            f.write(f'{var}: {val}\n')
+        f.close()
+
+
 # Define all colors to be used
 COLOR_NAMES = [k.replace('tab:', '') for k in mcolors.TABLEAU_COLORS.keys()]
 COLORS = list(mcolors.TABLEAU_COLORS.values())
