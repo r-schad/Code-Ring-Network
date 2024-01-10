@@ -557,7 +557,7 @@ if __name__ == '__main__':
     delta_exp_decay_rate = -0.002
     weight_min = 0.2
     weight_max = 0.8
-    num_epochs = 10000
+    num_epochs = 100
     tmax = 30
     tsteps = 300
     crn = CodeRingNetwork(num_ring_units=r,
@@ -583,5 +583,12 @@ if __name__ == '__main__':
     plt.plot(range(num_epochs), scores)
     plt.title(f'Scores Over Time {crn.id_string}')
     plt.savefig(f'{crn.folder_name}\\all_scores_{crn.id_string}.png')
+
+    ideal_curvature = crn.ideal_curvature
+    curvature_sd = crn.curvature_sd
+    intersec_growth = crn.intersec_growth
+    sigmoid_growth = crn.metric_sigmoid_growth
+    sigmoid_center = crn.metric_sigmoid_center
+
     write_params(f'{crn.folder_name}\\params_{crn.id_string}.txt', **locals())
     pass
