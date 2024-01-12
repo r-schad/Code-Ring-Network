@@ -61,11 +61,11 @@ def area_of_triangle(x1: float, y1: float, x2: float, y2: float, x3: float, y3: 
 
     :returns area float: the area of the triangle created by the 3 given points
     '''
-    area = 0.5 * (
+    area = np.abs(0.5 * (
         (x1 * (y2 - y3)) +
         (x2 * (y3 - y1)) +
         (x3 * (y1 - y2))
-    )
+    ))
     return area
 
 def dist(xi: float, yi: float, xj: float ,yj: float) -> float:

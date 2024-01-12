@@ -70,15 +70,13 @@ class CodeRingNetwork:
                                   weight_min=weight_min, weight_max=weight_max)
         
         # model/training-specific variables
-        self.activity_min = weight_min
-        self.activity_max = weight_max
         self.init_delta = init_delta
         self.delta = init_delta # delta: weighting of random code noise vs input from map
         self.delta_decay = delta_decay_rate
         
         # metric-specific variables
-        self.ideal_curvature = 0.5
-        self.curvature_sd = 0.5
+        self.ideal_curvature = 0.2
+        self.curvature_sd = 0.05
         self.intersec_growth = 0.2
         self.metric_sigmoid_growth = 10
         self.metric_sigmoid_center = 0.75
@@ -109,14 +107,15 @@ class CodeRingNetwork:
             rand_map_winner_idx = np.random.choice(map_size)
             # then activate the neighborhood around the winner
             rand_map_winner = self.map_layer.convert_to_coord(rand_map_winner_idx)
-            map_signal = self.map_layer.neighborhood(rand_map_winner)
+            map_signal = self.map_layer.neighborhood(rand_map_winner) / np.sum(self.map_layer.neighborhood(rand_map_winner))
             
             # propagate map signal forward
             weighted_map_signal = self.map_layer.weights_to_code_from_map @ map_signal.reshape(map_size, 1)
-            map_activation = weighted_map_signal #/ np.sum(weighted_map_signal) # TODO: figure out how to normalize this
+            map_activation = weighted_map_signal # TODO: figure out how to normalize this? Or just norm the map_signal?
 
             # apply random babbling signal into code layer
-            code_noise = np.random.uniform(low=self.activity_min, high=self.activity_max, size=(self.code_layer.num_code_units, 1))
+            uniform_code_noise = np.random.uniform(low=0, high=1, size=(self.code_layer.num_code_units, 1))
+            code_noise = np.where(uniform_code_noise < 0.8, 0.0, uniform_code_noise) # FIXME
 
             # get combined input into code layer by applying delta to babbling noise vs the map activation
             code_input = self.delta * code_noise + (1 - self.delta) * map_activation
@@ -189,7 +188,7 @@ class CodeRingNetwork:
             (r, c) = self.map_layer.convert_to_coord(i)
             activity_matrix[r, c] = 1.0
             weighted_map_signal = self.map_layer.weights_to_code_from_map @ activity_matrix.reshape(map_size, 1)
-            map_activation = weighted_map_signal # / np.sum(weighted_map_signal)
+            map_activation = weighted_map_signal
 
             # determine output of code layer (input into ring layer)
             ring_input = self.code_layer.weights_to_ring_from_code @ map_activation
@@ -551,13 +550,13 @@ if __name__ == '__main__':
     m_d1 = 8
     m_d2 = 8
     init_lr = 0.01
-    init_map_sigma = 2.5
-    nhood_exp_decay_rate = -0.001
-    initial_delta = 0.8
-    delta_exp_decay_rate = -0.002
-    weight_min = 0.2
-    weight_max = 0.8
-    num_epochs = 100
+    init_map_sigma = m_d1/2
+    nhood_exp_decay_rate = -1 * np.log(init_map_sigma) / 5000
+    initial_delta = 0.99
+    delta_exp_decay_rate = -0.0005
+    weight_min = 0.0
+    weight_max = 0.3
+    num_epochs = 10000
     tmax = 30
     tsteps = 300
     crn = CodeRingNetwork(num_ring_units=r,

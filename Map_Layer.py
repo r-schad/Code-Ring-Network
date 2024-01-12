@@ -141,6 +141,7 @@ class MapLayer():
                           np.subtract(self.weights_to_map_from_code, input_vec.T))
         if np.max(weight_changes) > 0.5:
             pass
+        
         self.weights_to_map_from_code += weight_changes # this updates both weight matrices
 
     def forward(self, code_activity: np.array) -> tuple:
