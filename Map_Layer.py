@@ -104,13 +104,14 @@ class MapLayer():
         # convert from coordinates to index
         return (coords[0] * self.d2) + coords[1]
     
-    def neighborhood(self, winner: tuple) -> np.ndarray:
+    def neighborhood(self, winner: tuple, sigma: float) -> np.ndarray:
         '''
         Takes in a winning neuron and current epoch and returns the (d1, d2) array
-            of the Gaussian neighborhood scaling factor for each neuron centered 
-            around the winner. Uses nhood_range in determining the Gaussian curve.
+            of the Gaussian neighborhood scaling factor (with std. dev. sigma)
+            for each neuron centered around the winner.
 
         :param winner tuple: the (i, j) coordinate of the winning neuron.
+        :param sigma float: the range of the neighboerhood
 
         :returns nhood np.ndarray: the (d1, d2) array of values of each neuron based 
             on the Gaussian neighborhood around `winner`. 
@@ -119,7 +120,7 @@ class MapLayer():
         # get the dist_array for the winner neuron
         dists = self.dist_arrays[winner_i]
         top = np.negative(np.square(dists))
-        bottom = 2 * self.nhood_range ** 2
+        bottom = 2 * sigma ** 2
         nhood = np.exp(np.divide(top, bottom))
         return nhood
     
@@ -135,10 +136,10 @@ class MapLayer():
 
         :returns: None
         '''
-        nhood_scores = self.neighborhood(winner).reshape(self.d1*self.d2, 1)
+        nhood_scores = self.neighborhood(winner, sigma=self.nhood_range).reshape(self.d1*self.d2, 1)
         effective_lr = self.learning_rate * (1 - score)
         weight_changes = (nhood_scores * effective_lr *
-                          np.subtract(self.weights_to_map_from_code, input_vec.T))
+                          np.subtract(input_vec.T, self.weights_to_map_from_code))
         if np.max(weight_changes) > 0.5:
             pass
         
