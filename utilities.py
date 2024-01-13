@@ -33,7 +33,7 @@ def gaussian(x: (float, np.ndarray), mean: float = 0.2, sd: float = 0.2, peak: f
     '''
     return peak * np.exp(-1 * np.square(x - mean) / (2 * (sd ** 2)))
 
-def exponential(t: (float, np.ndarray), rate: float, init_val: float) -> (float, np.ndarray):
+def exponential(t: (float, np.ndarray), rate: float, init_val: float, center: float = 0.0) -> (float, np.ndarray):
     '''
     Returns an exponential output of input variable t, with initial value init_val. 
         The growth/decay rate (depending on sign) is determined by parameter `rate`.
@@ -42,10 +42,11 @@ def exponential(t: (float, np.ndarray), rate: float, init_val: float) -> (float,
     :param rate float: growth/decay rate of the exponential curve; 
         if rate > 0, the function is exponential growth; if rate < 0, the function is exponential decay
     :param init_val float: initial value of the exponential curve
+    :param center float: the central/starting x-value of the exponential, i.e. where the y-value is init_val
 
     :returns output (float, np.ndarray): value or array of exponential decay output
     '''
-    output = init_val * np.exp(rate * t)
+    output = init_val * np.exp(rate * (t - center))
     return output
 
 def area_of_triangle(x1: float, y1: float, x2: float, y2: float, x3: float, y3: float) -> float:
