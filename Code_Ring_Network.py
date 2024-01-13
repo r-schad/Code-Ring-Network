@@ -81,7 +81,7 @@ class CodeRingNetwork:
         self.metric_sigmoid_growth = 10
         self.metric_sigmoid_center = 0.75
 
-    def train(self, num_epochs: int, durations: float, t_max: int, t_steps: int,
+    def train(self, num_epochs: int, activation_nhood: float, delta_decay_delay: int, durations: float, t_max: int, t_steps: int,
               plot_results: bool = True, plot_gif: bool = False) -> list:
         '''
         Trains the code-ring network by generating inputs consisting of 
@@ -91,6 +91,10 @@ class CodeRingNetwork:
             classical SOFM learning algorithm.
         
         :param num_epochs int: the number of iterations to train the model over
+        :param activation_nhood float: the std. dev. (sigma) of the neighborhood for map layer activity
+            NOTE: this stays static throughout learning so the weights don't have to adapt to the changing
+                distribution of map signals
+        :param delta_decay_delay int: the number of epochs to hold delta at its initial value before decaying
         :param durations float: the duration value output from the duration layer for each neuron
             FIXME: this is temporary, will need removed once duration layer is changed
         :param t_max int: the maximum time to integrate each iteration over
@@ -107,7 +111,11 @@ class CodeRingNetwork:
             rand_map_winner_idx = np.random.choice(map_size)
             # then activate the neighborhood around the winner
             rand_map_winner = self.map_layer.convert_to_coord(rand_map_winner_idx)
-            map_signal = self.map_layer.neighborhood(rand_map_winner) / np.sum(self.map_layer.neighborhood(rand_map_winner))
+
+            # apply static neighborhood range for activation neighborhood
+            # and normalize activation neighborhood so map_signal sums to 1.0
+            map_signal = (self.map_layer.neighborhood(rand_map_winner, sigma=activation_nhood) / 
+                          np.sum(self.map_layer.neighborhood(rand_map_winner, sigma=activation_nhood)))
             
             # propagate map signal forward
             weighted_map_signal = self.map_layer.weights_to_code_from_map @ map_signal.reshape(map_size, 1)
@@ -115,7 +123,7 @@ class CodeRingNetwork:
 
             # apply random babbling signal into code layer
             uniform_code_noise = np.random.uniform(low=0, high=1, size=(self.code_layer.num_code_units, 1))
-            code_noise = np.where(uniform_code_noise < 0.8, 0.0, uniform_code_noise) # FIXME
+            code_noise = np.where(uniform_code_noise < 0.9, 0.0, uniform_code_noise) # FIXME
 
             # get combined input into code layer by applying delta to babbling noise vs the map activation
             code_input = self.delta * code_noise + (1 - self.delta) * map_activation
@@ -156,12 +164,14 @@ class CodeRingNetwork:
             # update the weights (bidirectionally, so both weight matrices M<->C) based on quality of the output
             self.map_layer.update_weights(code_input, map_winner, score)
 
-            # decrease the neighborhood range
-            self.map_layer.nhood_range = exponential(epoch, self.map_layer.nhood_decay,
-                                                     self.map_layer.init_nhood_range)
-
-            # decrease the influence of the code babbling signal
-            self.delta = exponential(epoch, rate=self.delta_decay, init_val=self.init_delta)
+            # decrease the influence of the code babbling signal after the first delta_decay_delay epochs
+            if epoch >= delta_decay_delay:
+                self.delta = exponential(epoch, rate=self.delta_decay, init_val=self.init_delta, center=delta_decay_delay)
+                # decrease the neighborhood range
+                self.map_layer.nhood_range = exponential(epoch, self.map_layer.nhood_decay,
+                                                     self.map_layer.init_nhood_range, center=delta_decay_delay)
+                if epoch == delta_decay_delay:
+                    self.show_map_results(f'{self.folder_name}\\intermediate_outputs_{self.id_string}.png', durations, t_max, t_steps)
 
             print(f'Epoch {epoch}: {score}')
             scores += [score]
@@ -552,11 +562,13 @@ if __name__ == '__main__':
     init_lr = 0.01
     init_map_sigma = m_d1/2
     nhood_exp_decay_rate = -1 * np.log(init_map_sigma) / 5000
-    initial_delta = 0.99
+    map_activity_sigma = 0.8
+    initial_delta = 1.0
     delta_exp_decay_rate = -0.0005
+    delta_delay = 2000
     weight_min = 0.0
-    weight_max = 0.3
-    num_epochs = 10000
+    weight_max = 1.0
+    num_epochs = 50000
     tmax = 30
     tsteps = 300
     crn = CodeRingNetwork(num_ring_units=r,
@@ -577,9 +589,11 @@ if __name__ == '__main__':
     plt.ioff()
 
     crn.show_map_results(f'{crn.folder_name}\\initial_outputs_{crn.id_string}.png', durs, tmax, tsteps)
-    scores = crn.train(num_epochs, durs, tmax, tsteps, plot_gif=False)
+    scores = crn.train(num_epochs, map_activity_sigma, delta_delay, durs, tmax, tsteps, plot_gif=False)
     crn.show_map_results(f'{crn.folder_name}\\final_outputs_{crn.id_string}.png', durs, tmax, tsteps)
-    plt.plot(range(num_epochs), scores)
+    plt.scatter(range(num_epochs), scores, label='Doodle Scores')
+    plt.plot(np.convolve(scores, np.ones(100)/100, mode='valid'), c='#ff7f0e', label='Running Mean') # running mean
+    plt.plot_axvline(delta_delay, c='black', label='Beginning of Map Influence') # show where map activity starts having an impact
     plt.title(f'Scores Over Time {crn.id_string}')
     plt.savefig(f'{crn.folder_name}\\all_scores_{crn.id_string}.png')
 
