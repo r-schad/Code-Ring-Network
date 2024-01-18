@@ -166,8 +166,7 @@ class RingLayer:
 
         assert set([v.shape[0], u.shape[0], I_prime.shape[0]]) == set([self.num_ring_units]), f"State's shapes don't match! {v.shape, u.shape, I_prime.shape}"
 
-        z = sigmoid(v, self.beta, self.mu)
-    
+        z = sigmoid(v, self.beta, self.mu)   
         # calculate dv/dt, du/dt, DI'/dt
         inhibition_vec = 1 - (self.psi * np.dot(z, 1 - np.eye(self.num_ring_units))) # multiply by the sum of *other* neuron's outputs
         dv = (1 / self.tau) * ((-1 * self.lambda_ * u * v) + (I_prime * inhibition_vec))

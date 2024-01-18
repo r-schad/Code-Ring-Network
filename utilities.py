@@ -108,7 +108,6 @@ def write_params(filename, **kwargs):
             f.write(f'{var}: {val}\n')
         f.close()
 
-
 # Define all colors to be used
 COLOR_NAMES = [k.replace('tab:', '') for k in mcolors.TABLEAU_COLORS.keys()]
 COLORS = list(mcolors.TABLEAU_COLORS.values())

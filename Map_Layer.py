@@ -1,10 +1,8 @@
 import numpy as np
-import matplotlib.pyplot as plt
 
 class MapLayer():
     def __init__(self, map_d1: int, map_d2: int, num_ring_units: int, num_code_units: int,
-                 init_learning_rate: float, init_nhood_range: float, nhood_decay: float,
-                 weight_min: float, weight_max: float, epsilon=0.00001) -> None:
+                 weight_min: float, weight_max: float) -> None:
         '''
         A class implementing a Self-Organizing Feature Map (SOFM) as the foundation of the
           Code Ring Network. 
@@ -27,12 +25,7 @@ class MapLayer():
         self.d2 = map_d2
         self.num_ring_units = num_ring_units
         self.num_code_units = num_code_units
-        self.epsilon = epsilon
 
-        self.learning_rate = init_learning_rate
-        self.init_nhood_range = init_nhood_range
-        self.nhood_range = init_nhood_range
-        self.nhood_decay = nhood_decay
         self.neurons = np.array([[[i,j] for j in range(self.d1)] for i in range(self.d2)])
         self.dist_arrays = self.get_distances_for_all_neurons()
         self.weights_to_code_from_map = np.random.uniform(low=weight_min, high=weight_max, size=(num_code_units, int(map_d1*map_d2)))
@@ -124,7 +117,8 @@ class MapLayer():
         nhood = np.exp(np.divide(top, bottom))
         return nhood
     
-    def update_weights(self, input_vec: np.array, winner: tuple, score: float) -> None:
+    def update_weights(self, input_vec: np.array, winner: tuple,
+                       nhood_sigma: float, learning_rate: float, score: float) -> None:
         '''
         Takes in a single input vector, winning neuron, and the score of the output,
             and updates both of the model's weight matrices in-place. Uses learning_rate in the 
@@ -132,16 +126,17 @@ class MapLayer():
 
         :param input_vec np.ndarray: the input vector to compare the weights against
         :param winner tuple: the winning neuron whose weights are closest to `input_vec`
+        :param nhood_sigma float: the std. dev. of the Gaussian neighborhood for the map weight update equation
+        :param learning_rate float: the maximum learning rate applied to this weight update
+            NOTE: the effective learning rate is calculated by scaling learning_rate by the score of the output
         :param score float: the score of the output, as determined by the metric function
 
         :returns: None
         '''
-        nhood_scores = self.neighborhood(winner, sigma=self.nhood_range).reshape(self.d1*self.d2, 1)
-        effective_lr = self.learning_rate * (1 - score)
+        nhood_scores = self.neighborhood(winner, sigma=nhood_sigma).reshape(self.d1*self.d2, 1)
+        effective_lr = learning_rate * score
         weight_changes = (nhood_scores * effective_lr *
                           np.subtract(input_vec.T, self.weights_to_map_from_code))
-        if np.max(weight_changes) > 0.5:
-            pass
         
         self.weights_to_map_from_code += weight_changes # this updates both weight matrices
 
@@ -154,9 +149,7 @@ class MapLayer():
 
         :returns winner_coords tuple: the (i, j) coordinates of the winning neuron
         '''
-        # TODO: do we need to reshape here?
-        weights_reshaped = self.weights_to_code_from_map
-        norms = np.linalg.norm(weights_reshaped - code_activity, axis=0)
+        norms = np.linalg.norm(code_activity.T - self.weights_to_map_from_code, axis=0)
         winner_index = int(np.argmin(norms))
         winner_coords = self.convert_to_coord(winner_index)
 
