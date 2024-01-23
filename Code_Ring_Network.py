@@ -62,8 +62,8 @@ class CodeRingNetwork:
                                   weight_min, weight_max)
                
         # metric-specific variables
-        self.ideal_curvature = 0.2
-        self.curvature_sd = 0.05
+        self.ideal_curvature = 1
+        self.curvature_sd = 0.2
         self.intersec_growth = 0.2
         self.metric_sigmoid_growth = 10
         self.metric_sigmoid_center = 0.75
@@ -625,7 +625,7 @@ class CodeRingNetwork:
         '''
         avg_curv_subscore = (1 / (t_steps - 3)) * np.sum((-1 * gaussian(curvatures, mean=self.ideal_curvature, sd=self.curvature_sd)) + 1)
         intersec_subscore = exponential(num_intersecs, rate=self.intersec_growth, init_val=1) - 1
-        score = sigmoid(avg_curv_subscore + intersec_subscore, beta=self.metric_sigmoid_growth, mu=self.metric_sigmoid_center)
+        score = sigmoid(avg_curv_subscore + intersec_subscore, beta=self.metric_sigmoid_growth, mu=self.metric_sigmoid_center) # FIXME: this needs to be score=1-sigmoid
         return score
 
     
@@ -648,14 +648,14 @@ if __name__ == '__main__':
     tmax = 30
     tsteps = 300
 
-    pretrain_epochs = 50
-    pretrain_lr = 0.1
-    pretrain_nhood_sigma = map_neurons_d1 / 3
+    pretrain_epochs = 5000
+    pretrain_lr = 0.05
+    pretrain_nhood_sigma = map_neurons_d1 / 4
 
-    train_epochs = 500
-    train_init_lr = 0.05
+    train_epochs = 45000
+    train_init_lr = 0.01
     train_lr_decay = 0.0
-    train_init_map_sigma = map_neurons_d1 / 3
+    train_init_map_sigma = map_neurons_d1 / 4
     train_nhood_decay = -1 * np.log(train_init_map_sigma) / 5000
     train_init_delta = 1.0
     delta_exp_decay_rate = -0.0005
@@ -674,7 +674,13 @@ if __name__ == '__main__':
     crn.show_map_results(f'{crn.folder_name}\\initial_outputs_{crn.id_string}.png', durs, tmax, tsteps)
 
     pretrain_scores = crn.pretrain(pretrain_epochs, pretrain_nhood_sigma, pretrain_lr, durs, tmax, tsteps, plot_results=False, plot_gif=False)
+    # plot pretraining map
     crn.show_map_results(f'{crn.folder_name}\\pretraining_outputs_{crn.id_string}.png', durs, tmax, tsteps)
+    # plot pretraining weights
+    plt.matshow(crn.map_layer.weights_to_map_from_code)
+    plt.colorbar()
+    plt.savefig(f'{crn.folder_name}\\pretraining_weights_{crn.id_string}.png')
+    plt.close()
 
 
     train_scores = crn.train(train_epochs, map_activity_sigma, train_init_delta, delta_exp_decay_rate,
@@ -703,7 +709,7 @@ if __name__ == '__main__':
     # plot weights
     plt.matshow(crn.map_layer.weights_to_map_from_code)
     plt.colorbar()
-    plt.savefig(f'{crn.folder_name}\\weights_{crn.id_string}.png')
+    plt.savefig(f'{crn.folder_name}\\final_weights_{crn.id_string}.png')
     plt.close()
 
     ideal_curvature = crn.ideal_curvature
