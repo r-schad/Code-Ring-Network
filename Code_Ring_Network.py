@@ -9,7 +9,7 @@ from Ring_Layer import RingLayer
 from Code_Layer import CodeLayer
 from Duration_Layer import DurationLayer
 from Map_Layer import MapLayer
-from utilities import get_color_range, curvature, gaussian, exponential, sigmoid, write_params
+from utilities import get_color_range, curvature, gaussian, exponential, sigmoid, write_params, dist
 
 class CodeRingNetwork:
     def __init__(self, num_ring_units: int, num_code_units: int, code_factor: int, num_dur_units: int,
@@ -62,11 +62,13 @@ class CodeRingNetwork:
                                   weight_min, weight_max)
                
         # metric-specific variables
-        self.ideal_curvature = 1
-        self.curvature_sd = 0.2
-        self.intersec_growth = 0.2
-        self.metric_sigmoid_growth = 10
-        self.metric_sigmoid_center = 0.75
+        self.ideal_curvature = 2
+        self.curvature_sd = 0.8
+        self.intersec_rate = -1.5
+        # self.metric_sigmoid_growth = 10
+        # self.metric_sigmoid_center = 0.75
+        self.doodle_len_beta = 50
+        self.min_doodle_len = 5
 
     def pretrain(self, num_epochs: int, learning_sigma: float, learning_rate: float,
                  durations: float, t_max: int, t_steps: int,
@@ -582,7 +584,23 @@ class CodeRingNetwork:
         
         return new_intersec, t_return
     
-    def evaluate(self, x_series: np.ndarray, y_series: np.ndarray, t_steps: int) -> tuple[float, list, np.ndarray, np.array]:
+    def calc_doodle_len(self, xs: np.array, ys: np.array) -> float:
+        '''
+        Calculates the length of the entire doodle, segment by segment.
+        :param xs np.array: list of all x-coordiates throughout the doodle
+        :param ys np.array: list of all y-coordiates throughout the doodle
+
+        :returns doodle_len float: total length of doodle
+        '''
+        x1s = xs[:-1]
+        x2s = np.roll(xs, -1)[:-1]
+        y1s = ys[:-1]
+        y2s = np.roll(ys, -1)[:-1]
+        dists = dist(x1s, y1s, x2s, y2s)
+        doodle_len = np.sum(dists)
+        return doodle_len
+    
+    def evaluate(self, x_series: np.ndarray, y_series: np.ndarray, t_steps: int) -> tuple[float, np.array, np.ndarray, np.array]:
         '''
         Gets the intersection points, curvature values, and total metric score of a doodle,
             and returns the 4-tuple of score, curvatures, intersection points, intersection times.
@@ -591,7 +609,7 @@ class CodeRingNetwork:
         :param y_series np.array: array of y-coordinates over time
         :param t_steps int: the number of timesteps integrated over
 
-        :returns (score: float, curvatures: list, intersec_pts: np.ndarray, intersec_times: np.array):
+        :returns (score: float, curvatures: np.array, intersec_pts: np.ndarray, intersec_times: np.array):
             a tuple containing the metric score, a list of curvature scores,
             an array of [x, y] intersection points, and an array of the corresponding timesteps of intersection
         '''
@@ -609,25 +627,31 @@ class CodeRingNetwork:
             curvatures += [curvature(x1=x_series[t_cur-2], y1=y_series[t_cur-2],
                                         x2=x_series[t_cur-1], y2=y_series[t_cur-1],
                                         x3=x_series[t_cur], y3=y_series[t_cur])]
-        score = self.metric(t_steps, np.array(curvatures), len(intersec_times))
+            
+        curvatures = np.array(curvatures)
+            
+        doodle_length = self.calc_doodle_len(x_series, y_series)
+        score = self.metric(curvatures, len(intersec_times), doodle_length)
         return score, curvatures, intersec_pts, intersec_times
 
-    def metric(self, t_steps: int, curvatures: list, num_intersecs: int):
+    def metric(self, curvatures: np.array, num_intersecs: int, doodle_length: float) -> float:
         '''
         The metric based on which doodles are evaluated. Combines an average curvature score 
             with the ratio of intersection points to determine an overall quality score of a doodle.
 
-        :param t_steps int: the number of timesteps over which the doodle was drawn.
-        :param curvatures list: the list of curvatures for each discretized line segment of the doodle
+        :param curvatures np.array: the curvature values for each discretized line segment of the doodle
         :param num_intersecs int: the number of intersection points occurring in the doodle
+        :param doodle_length float: total length of doodle
 
         :returns score float: the combined metric score of the given doodle
         '''
-        avg_curv_subscore = (1 / (t_steps - 3)) * np.sum((-1 * gaussian(curvatures, mean=self.ideal_curvature, sd=self.curvature_sd)) + 1)
-        intersec_subscore = exponential(num_intersecs, rate=self.intersec_growth, init_val=1) - 1
-        score = sigmoid(avg_curv_subscore + intersec_subscore, beta=self.metric_sigmoid_growth, mu=self.metric_sigmoid_center) # FIXME: this needs to be score=1-sigmoid
+        avg_curv_subscore = (np.sum(gaussian(curvatures,
+                                mean=self.ideal_curvature, sd=self.curvature_sd)) /
+                                len(curvatures))
+        intersec_score = exponential(num_intersecs, rate=self.intersec_rate, init_val=1)
+        length_score = sigmoid(doodle_length, beta=self.doodle_len_beta, mu=self.min_doodle_len) # TODO: parameterize these
+        score = avg_curv_subscore * intersec_score * length_score
         return score
-
     
 if __name__ == '__main__':
     ring_neurons = 36
@@ -650,71 +674,74 @@ if __name__ == '__main__':
 
     pretrain_epochs = 5000
     pretrain_lr = 0.05
-    pretrain_nhood_sigma = map_neurons_d1 / 4
+    pretrain_nhood_sigma = map_neurons_d1 / 3
 
     train_epochs = 45000
     train_init_lr = 0.01
     train_lr_decay = 0.0
-    train_init_map_sigma = map_neurons_d1 / 4
+    train_init_map_sigma = map_neurons_d1 / 3
     train_nhood_decay = -1 * np.log(train_init_map_sigma) / 5000
     train_init_delta = 1.0
-    delta_exp_decay_rate = -0.0005
+    delta_exp_decay_rate = -0.0001
 
-    crn = CodeRingNetwork(num_ring_units=ring_neurons,
+    for doodle_length in [1,2,5,6,8,10]:
+        crn = CodeRingNetwork(num_ring_units=ring_neurons,
                         num_code_units=code_neurons,
                         code_factor=code_factor,
                         num_dur_units=duration_neurons,
                         map_d1=map_neurons_d1, map_d2=map_neurons_d2,
                         weight_min=weight_CR_min, weight_max=weight_CR_max,
                         code_ring_spread=weight_RC_spread)
+        
+        crn.ideal_doodle_len = doodle_length
             
-    crn.id_string = crn.folder_name.split('\\')[-1]
-    plt.ioff()
+        crn.id_string = crn.folder_name.split('\\')[-1] + f'doodle_len-{doodle_length}'
+        plt.ioff()
 
-    crn.show_map_results(f'{crn.folder_name}\\initial_outputs_{crn.id_string}.png', durs, tmax, tsteps)
+        crn.show_map_results(f'{crn.folder_name}\\initial_outputs_{crn.id_string}.png', durs, tmax, tsteps)
 
-    pretrain_scores = crn.pretrain(pretrain_epochs, pretrain_nhood_sigma, pretrain_lr, durs, tmax, tsteps, plot_results=False, plot_gif=False)
-    # plot pretraining map
-    crn.show_map_results(f'{crn.folder_name}\\pretraining_outputs_{crn.id_string}.png', durs, tmax, tsteps)
-    # plot pretraining weights
-    plt.matshow(crn.map_layer.weights_to_map_from_code)
-    plt.colorbar()
-    plt.savefig(f'{crn.folder_name}\\pretraining_weights_{crn.id_string}.png')
-    plt.close()
+        pretrain_scores = crn.pretrain(pretrain_epochs, pretrain_nhood_sigma, pretrain_lr, durs, tmax, tsteps, plot_results=False, plot_gif=False)
+        # plot pretraining map
+        crn.show_map_results(f'{crn.folder_name}\\pretraining_outputs_{crn.id_string}.png', durs, tmax, tsteps)
+        # plot pretraining weights
+        plt.matshow(crn.map_layer.weights_to_map_from_code)
+        plt.colorbar()
+        plt.savefig(f'{crn.folder_name}\\pretraining_weights_{crn.id_string}.png')
+        plt.close()
 
+        train_scores = crn.train(train_epochs, map_activity_sigma, train_init_delta, delta_exp_decay_rate,
+                        train_init_map_sigma, train_nhood_decay,
+                        train_init_lr, train_lr_decay,
+                        durs, tmax, tsteps, plot_gif=False, plot_results=False)
+        crn.show_map_results(f'{crn.folder_name}\\final_outputs_{crn.id_string}.png', durs, tmax, tsteps)
+        
+        total_epochs = pretrain_epochs + train_epochs
+        all_scores = pretrain_scores + train_scores
+        running_mean_window = int(total_epochs / 100)
 
-    train_scores = crn.train(train_epochs, map_activity_sigma, train_init_delta, delta_exp_decay_rate,
-                       train_init_map_sigma, train_nhood_decay,
-                       train_init_lr, train_lr_decay,
-                       durs, tmax, tsteps, plot_gif=False, plot_results=False)
-    crn.show_map_results(f'{crn.folder_name}\\final_outputs_{crn.id_string}.png', durs, tmax, tsteps)
-    
-    total_epochs = pretrain_epochs + train_epochs
-    all_scores = pretrain_scores + train_scores
-    running_mean_window = int(total_epochs / 100)
+        # plot results timeseries
+        # scatter all scores
+        plt.scatter(range(total_epochs), all_scores, label='Doodle Scores', s=1)
+        # plot running mean
+        plt.plot(np.convolve(all_scores, np.ones(running_mean_window)/running_mean_window, mode='valid'),
+                c='#ff7f0e', label='Running Mean', linewidth=2)
+        # show where map activity starts having an impact
+        plt.axvline(pretrain_epochs, c='black', label='Beginning of Map Influence')
+        plt.title(f'Scores Over Time {crn.id_string}')
+        plt.legend()
+        plt.savefig(f'{crn.folder_name}\\all_scores_{crn.id_string}.png')
+        plt.close()
 
-    # plot results timeseries
-    # scatter all scores
-    plt.scatter(range(total_epochs), all_scores, label='Doodle Scores', s=1)
-    # plot running mean
-    plt.plot(np.convolve(all_scores, np.ones(running_mean_window)/running_mean_window, mode='valid'),
-            c='#ff7f0e', label='Running Mean', linewidth=2)
-    # show where map activity starts having an impact
-    plt.axvline(pretrain_epochs, c='black', label='Beginning of Map Influence')
-    plt.title(f'Scores Over Time {crn.id_string}')
-    plt.legend()
-    plt.savefig(f'{crn.folder_name}\\all_scores_{crn.id_string}.png')
-    plt.close()
+        # plot weights
+        plt.matshow(crn.map_layer.weights_to_map_from_code)
+        plt.colorbar()
+        plt.savefig(f'{crn.folder_name}\\final_weights_{crn.id_string}.png')
+        plt.close()
 
-    # plot weights
-    plt.matshow(crn.map_layer.weights_to_map_from_code)
-    plt.colorbar()
-    plt.savefig(f'{crn.folder_name}\\final_weights_{crn.id_string}.png')
-    plt.close()
-
-    ideal_curvature = crn.ideal_curvature
+    curv_min = crn.low_curv
+    curv_max = crn.high_curv
     curvature_sd = crn.curvature_sd
-    intersec_growth = crn.intersec_growth
+    intersec_rate = crn.intersec_rate
     sigmoid_growth = crn.metric_sigmoid_growth
     sigmoid_center = crn.metric_sigmoid_center
 
