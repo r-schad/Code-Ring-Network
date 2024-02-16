@@ -9,7 +9,7 @@ from Ring_Layer import RingLayer
 from Code_Layer import CodeLayer
 from Duration_Layer import DurationLayer
 from Map_Layer import MapLayer
-from utilities import get_color_range, curvature, gaussian, exponential, sigmoid, write_params, dist
+from utilities import get_color_range, curvature, gaussian, exponential, sigmoid, write_params, dist, diff_curvature
 
 class CodeRingNetwork:
     def __init__(self, num_ring_units: int, num_code_units: int, code_factor: int, num_dur_units: int,
@@ -61,15 +61,6 @@ class CodeRingNetwork:
         self.map_layer = MapLayer(map_d1, map_d2, num_ring_units, num_code_units,
                                   weight_min, weight_max)
                
-        # metric-specific variables
-        self.ideal_curvature = 2
-        self.curvature_sd = 0.8
-        self.intersec_rate = -1.5
-        # self.metric_sigmoid_growth = 10
-        # self.metric_sigmoid_center = 0.75
-        self.doodle_len_beta = 50
-        self.min_doodle_len = 5
-
     def pretrain(self, num_epochs: int, learning_sigma: float, learning_rate: float,
                  durations: float, t_max: int, t_steps: int,
                  plot_results: bool = False, plot_gif: bool = False) -> list:
@@ -96,13 +87,24 @@ class CodeRingNetwork:
         :returns scores list: list of the scores of the doodles over time      
         '''
         scores = []
-        for epoch in tqdm(range(num_epochs)):
-            # apply random babbling signal into code layer
-            uniform_code_noise = np.random.uniform(low=0, high=1, size=(self.code_layer.num_code_units, 1))
-            code_input = np.where(uniform_code_noise < 0.9, 0.0, uniform_code_noise) # TODO: change to a distribution
-         
+        for iteration in tqdm(range(num_epochs)):
+            # select random number (5-7) of neurons to activate
+            num_active_noise = np.random.randint(0,self.ring_layer.num_ring_units)
+
+            # select num_active_noise neurons to activate
+            active_idxs = np.random.choice(np.arange(0, self.code_layer.num_code_units), size=num_active_noise, replace=False)
+
+            # get random babbling activation values
+            noise_values = np.random.uniform(low=0.0, high=1, size=(num_active_noise, 1))
+
+            # create code_output array as zeros
+            code_output = np.zeros((self.code_layer.num_code_units, 1))
+
+            # replace zeros with noise_values
+            code_output[active_idxs] = noise_values / np.max(noise_values)
+
             # determine output of code layer (input into ring layer)
-            ring_input = (self.code_layer.weights_to_ring_from_code @ code_input).squeeze()
+            ring_input = (self.code_layer.weights_to_ring_from_code @ code_output).squeeze()
 
             # determine activity of duration layer
             # TODO: right now, this is just a constant
@@ -126,25 +128,24 @@ class CodeRingNetwork:
                 self.plot_results(x_series, y_series, intersec_pts,
                             ring_inputs=ring_input,
                             v=plot_v, u=plot_u, z=plot_z, I_prime=plot_I_prime,
-                            folder_name=self.folder_name, epoch=epoch, score=score, plot_gif=plot_gif)
+                            folder_name=self.folder_name, epoch=iteration, active_idx=-1, score=score, plot_gif=plot_gif)
 
             if plot_gif:
-                self.create_gif(x_series, y_series, t_steps, intersec_pts, intersec_times, self.folder_name, epoch)
+                self.create_gif(x_series, y_series, t_steps, intersec_pts, intersec_times, self.folder_name, iteration)
                 
             # determine the most similar neuron to the activity of the code layer
-            map_winner = self.map_layer.forward(code_input)
+            map_winner = self.map_layer.forward(code_output)
 
             # update the weights (bidirectionally, so both weight matrices M<->C) based on quality of the output
-            self.map_layer.update_weights(code_input, map_winner,
+            self.map_layer.update_weights(code_output, map_winner,
                                           nhood_sigma=learning_sigma, learning_rate=learning_rate,
                                           score=score)
 
-            print(f'Pretraining Epoch {epoch}: {score}')
+            print(f'Pretraining Iteration {iteration}: {score}')
             scores += [score]
 
         return scores
         
-
     def train(self, num_epochs: int, activation_nhood: float,
               init_delta: float, delta_decay_rate: float,
               init_learning_nhood: float, learning_nhood_decay: float,
@@ -180,71 +181,134 @@ class CodeRingNetwork:
         :returns scores list: list of the scores of the doodles over time      
         '''
         map_size = int(self.map_layer.d1 * self.map_layer.d1)
-        scores = []
+        scores = np.ndarray((num_epochs, map_size))
+
+        # define metric-specific arguments
+        max_curv = 20
+        curv_penalty_rate = -0.05
+        intersec_penalty_rate = -1.5
+        doodle_len_beta = 3
+        min_doodle_len = 5
+        metric_init_mu = 0.9
+        metric_mu_decay = -0.0005
+        score_mu = metric_init_mu
+        metric_init_beta = 50
+        metric_beta_decay = -0.003
+        score_beta = metric_init_beta
+
+        self.show_map_results(f'{self.folder_name}\\map_at_initial_{self.id_string}.png', durations, t_max, t_steps,
+                              max_curv=max_curv, curv_penalty_rate=curv_penalty_rate,
+                              intersec_penalty_rate=intersec_penalty_rate,
+                              doodle_len_beta=doodle_len_beta, min_doodle_len=min_doodle_len,
+                              score_mu=score_mu, score_beta=score_beta)
         
         learning_rate = init_learning_rate
         learning_nhood = init_learning_nhood
         delta = init_delta
+        map_idxs = np.arange(map_size)
+        activity_counts = {m: 0 for m in map_idxs}
+        winner_counts = {m: 0 for m in map_idxs}
         for epoch in tqdm(range(num_epochs)):
-            # get map activity by choosing a random winning neuron
-            rand_map_winner_idx = np.random.choice(map_size)
-            # then activate the neighborhood around the winner
-            rand_map_winner = self.map_layer.convert_to_coord(rand_map_winner_idx)
+            # randomly shuffle the order of map neuron activations
+            np.random.shuffle(map_idxs)
+            for iteration, rand_active_idx in enumerate(tqdm(map_idxs)):
+                rand_active_neuron = self.map_layer.convert_to_coord(rand_active_idx)
 
-            # apply static neighborhood range for activation neighborhood
-            # and normalize activation neighborhood so map_signal sums to 1.0
-            map_signal = (self.map_layer.neighborhood(rand_map_winner, sigma=activation_nhood) /
-                          np.sum(self.map_layer.neighborhood(rand_map_winner, sigma=activation_nhood)))
-            
-            # propagate map signal forward
-            map_activation = self.map_layer.weights_to_code_from_map @ map_signal.reshape(map_size, 1)
-
-            # apply random babbling signal into code layer
-            uniform_code_noise = np.random.uniform(low=0, high=1, size=(self.code_layer.num_code_units, 1))
-            code_noise = np.where(uniform_code_noise < 0.9, 0.0, uniform_code_noise) # TODO: change to a distribution
-
-            # get combined input into code layer by applying delta to babbling noise vs the map activation
-            code_input = delta * code_noise + (1 - delta) * map_activation
-           
-            # determine output of code layer (input into ring layer)
-            ring_input = (self.code_layer.weights_to_ring_from_code @ code_input).squeeze()
-
-            # determine activity of duration layer
-            # TODO: right now, this is just a constant
-            dur_output = self.duration_layer.activate(durations)
-
-            # integrate ring layer model over time
-            v_series, z_series, u_series, I_prime_series = self.ring_layer.activate(ring_input, dur_output, t_max=t_max, t_steps=t_steps)
-            
-            # apply model results to the drawing system
-            x_series, y_series = self.ring_layer.create_drawing(z_series, t_steps)
-
-            # evaluate drawing
-            score, curvatures, intersec_pts, intersec_times = self.evaluate(x_series, y_series, t_steps)
-
-            # plot ring layer variables over time
-            plot_v = v_series if self.vars_to_plot['v'] else []
-            plot_u = u_series if self.vars_to_plot['u'] else []
-            plot_z = z_series if self.vars_to_plot['z'] else []
-            plot_I_prime = I_prime_series if self.vars_to_plot['I_prime'] else []
-            if plot_results:
-                self.plot_results(x_series, y_series, intersec_pts,
-                            ring_inputs=ring_input,
-                            v=plot_v, u=plot_u, z=plot_z, I_prime=plot_I_prime,
-                            folder_name=self.folder_name, epoch=epoch, score=score, plot_gif=plot_gif)
-
-            if plot_gif:
-                self.create_gif(x_series, y_series, t_steps, intersec_pts, intersec_times, self.folder_name, epoch)
+                # apply static neighborhood range for activation neighborhood
+                # to activate the neighborhood around the winner
+                map_signal = self.map_layer.neighborhood(rand_active_neuron, sigma=activation_nhood)
+                # map_signal = self.map_layer.neighborhood(rand_active_neuron, sigma=learning_nhood)
                 
-            # determine the most similar neuron to the activity of the code layer
-            map_winner = self.map_layer.forward(code_input)
+                # propagate map signal forward
+                map_activation = self.map_layer.weights_to_code_from_map @ map_signal.reshape(map_size, 1)
 
-            # update the weights (bidirectionally, so both weight matrices M<->C)
-            # update is based on output score, current nhood range, and learning rate
-            self.map_layer.update_weights(code_input, map_winner,
-                                          nhood_sigma=learning_nhood, learning_rate=learning_rate,
-                                          score=score)
+                # select random number (5-7) of neurons to activate
+                num_active_noise = 36 # np.random.randint(5,8) # TODO: try all 36 random noise
 
+                # select num_active_noise neurons to activate
+                noise_idxs = np.random.choice(np.arange(0, self.code_layer.num_code_units),
+                                               size=num_active_noise, replace=False)
+
+                # get random babbling activation values
+                noise_values = np.random.uniform(low=0.0, high=1, size=(num_active_noise, 1))
+
+                # create code_input array as zeros
+                code_noise = np.zeros((self.code_layer.num_code_units, 1))
+
+                # replace zeros with noise_values
+                code_noise[noise_idxs] = noise_values
+
+                # get combined input into code layer by applying delta to babbling noise vs the map activation
+                code_input = delta * code_noise + (1 - delta) * map_activation
+                code_output = code_input / np.max(code_input)
+                
+                # determine output of code layer (input into ring layer)
+                ring_input = (self.code_layer.weights_to_ring_from_code @ code_output).squeeze()
+
+                # determine activity of duration layer
+                # TODO: right now, this is just a constant
+                dur_output = self.duration_layer.activate(durations)
+
+                # integrate ring layer model over time
+                v_series, z_series, u_series, I_prime_series = self.ring_layer.activate(ring_input, dur_output, t_max=t_max, t_steps=t_steps)
+                
+                # apply model results to the drawing system
+                x_series, y_series = self.ring_layer.create_drawing(z_series, t_steps)
+
+                # evaluate drawing
+                score, curvatures, intersec_pts, intersec_times = self.evaluate(x_series, y_series, t_steps=t_steps,
+                                                                max_curv=max_curv, curv_penalty_rate=curv_penalty_rate,
+                                                                intersec_penalty_rate=intersec_penalty_rate,
+                                                                doodle_len_beta=doodle_len_beta, min_doodle_len=min_doodle_len,
+                                                                score_mu=score_mu, score_beta=score_beta)
+                
+                # determine the most similar neuron to the activity of the code layer
+                map_winner = self.map_layer.forward(code_output)
+                winner_idx = self.map_layer.convert_to_index(map_winner)
+
+                # update the weights (bidirectionally, so both weight matrices M<->C)
+                # update is based on output score, current nhood range, and learning rate
+                self.map_layer.update_weights(code_output, map_winner,
+                                            nhood_sigma=learning_nhood, learning_rate=learning_rate,
+                                            score=score)
+
+                print(f'Training Epoch {epoch} | Active Neuron {rand_active_idx} | Winner Neuron {winner_idx}: {score}')
+                scores[epoch][rand_active_idx] = score
+
+                activity_counts[rand_active_idx] += 1
+                winner_counts[winner_idx] += 1
+
+                # plot ring layer variables over time
+                plot_v = v_series if self.vars_to_plot['v'] else []
+                plot_u = u_series if self.vars_to_plot['u'] else []
+                plot_z = z_series if self.vars_to_plot['z'] else []
+                plot_I_prime = I_prime_series if self.vars_to_plot['I_prime'] else []
+                if plot_results:
+                    self.plot_results(x_series, y_series, intersec_pts,
+                                ring_inputs=ring_input,
+                                v=plot_v, u=plot_u, z=plot_z, I_prime=plot_I_prime,
+                                folder_name=self.folder_name,
+                                epoch=epoch, iteration=iteration,
+                                active_idx=rand_active_idx, winner_idx=winner_idx,
+                                score=score, plot_gif=plot_gif)
+
+                if plot_gif:
+                    self.create_gif(x_series, y_series, t_steps, intersec_pts, intersec_times, self.folder_name, epoch)
+
+                # if not os.path.isdir(f'{self.folder_name}\\weights'):
+                #     os.makedirs(f'{self.folder_name}\\weights')
+                
+                # plt.matshow(self.map_layer.weights_to_code_from_map, vmin=0, vmax=1)
+                # plt.colorbar()
+                # plt.title(f'Weights at Epoch {epoch}, Iteration {iteration}\n\
+                #         Score = {np.round(score,2)} | Active = {rand_active_idx} | Winner = {winner_idx}',
+                #         fontsize=12)
+                
+                # plt.xlabel('Map Neurons')
+                # plt.ylabel('Code Neurons')
+                # plt.savefig(f'{self.folder_name}\\weights\\weights_epoch{epoch}_iteration{iteration}_{self.id_string}.png')
+                # plt.close()
+                    
             # decrease the influence of the code babbling signal
             delta = exponential(epoch, rate=delta_decay_rate, init_val=init_delta)
             
@@ -253,13 +317,34 @@ class CodeRingNetwork:
 
             # decrease the learning rate (if learning_rate_decay == 0, use static learning rate)
             learning_rate = exponential(epoch, rate=learning_rate_decay, init_val=init_learning_rate)
+ 
+            # decrease selectiveness of metric
+            score_beta = exponential(epoch, rate=metric_beta_decay, init_val=metric_init_beta)
+            score_mu = exponential(epoch, rate=metric_mu_decay, init_val=metric_init_mu)
 
-            print(f'Training Epoch {epoch}: {score}')
-            scores += [score]
+            if not(epoch % 100):
+                self.show_map_results(f'{self.folder_name}\\map_epoch{epoch}_{self.id_string}.png', durations, t_max, t_steps,
+                                    max_curv=max_curv, curv_penalty_rate=curv_penalty_rate, 
+                                    intersec_penalty_rate=intersec_penalty_rate, 
+                                    doodle_len_beta=doodle_len_beta, min_doodle_len=min_doodle_len, 
+                                    score_mu=score_mu, score_beta=score_beta)
+                plt.matshow(self.map_layer.weights_to_code_from_map, vmin=0, vmax=1)
+                plt.colorbar()
+                plt.title(f'Weights at Epoch {epoch}')
+                plt.xlabel('Map Neurons')
+                plt.ylabel('Code Neurons')
+                plt.savefig(f'{self.folder_name}\\weights_epoch{epoch}_{self.id_string}.png')
+                plt.close()
+        
+        self.show_map_results(f'{self.folder_name}\\map_final_{self.id_string}.png', durations, t_max, t_steps, 
+                              max_curv=max_curv, curv_penalty_rate=curv_penalty_rate, 
+                              intersec_penalty_rate=intersec_penalty_rate, 
+                              doodle_len_beta=doodle_len_beta, min_doodle_len=min_doodle_len, 
+                              score_mu=score_mu, score_beta=score_beta)
 
         return scores
     
-    def show_map_results(self, filename, durations: float, t_max: int, t_steps: int) -> None:
+    def show_map_results(self, filename, durations: float, t_max: int, t_steps: int, **metric_kwargs) -> None:
         '''
         Saves the outputted drawing from each map neuron in one overall figure.
 
@@ -272,17 +357,17 @@ class CodeRingNetwork:
         '''
         print('Saving Map Results Plot')
         map_size = self.map_layer.d1 * self.map_layer.d2
-        fig, axs = plt.subplots(self.map_layer.d1, self.map_layer.d2, 
+        fig, axs = plt.subplots(self.map_layer.d1, self.map_layer.d2,
                                 figsize=(self.map_layer.d1,self.map_layer.d2), sharex=True, sharey=True)
 
         activity_matrix = np.zeros((self.map_layer.d1, self.map_layer.d2))
         for i in tqdm(range(map_size)):
             (r, c) = self.map_layer.convert_to_coord(i)
             activity_matrix[r, c] = 1.0
-            map_activation = self.map_layer.weights_to_code_from_map @ activity_matrix.reshape(map_size, 1)
+            code_input = self.map_layer.weights_to_code_from_map @ activity_matrix.reshape(map_size, 1)
 
             # determine output of code layer (input into ring layer)
-            ring_input = self.code_layer.weights_to_ring_from_code @ map_activation
+            ring_input = self.code_layer.weights_to_ring_from_code @ code_input
 
             # determine activity of duration layer
             # TODO: right now, this is just a constant
@@ -295,21 +380,28 @@ class CodeRingNetwork:
             x_series, y_series = self.ring_layer.create_drawing(z_series, t_steps)
 
             # evaluate drawing
-            score, curvatures, intersec_pts, intersec_times = self.evaluate(x_series, y_series, t_steps)
+            score, curvatures, intersec_pts, intersec_times = self.evaluate(x_series, y_series, t_steps=t_steps, **metric_kwargs)
                                             
             # generate drawing for current neuron
             self.plot_final_doodle(ax=axs[r][c], xs=x_series, ys=y_series, intersec_pts=intersec_pts, individualize_plot=False)
+            axs[r][c].set_xlim([-50,50])
+            axs[r][c].set_ylim([-50,50])
             axs[r][c].set_xlabel(f'{np.round(score,3)}')
+            axs[r][c].set_box_aspect(1)
+
+            # reset active neuron to inactive
             activity_matrix[r, c] = 0.0
 
         plt.tight_layout()
         fig.savefig(filename)
-        plt.close()
+        plt.close(fig)
 
     def plot_results(self, xs: np.array, ys: np.array, intersec_pts: np.ndarray,
                      ring_inputs: np.array, v: np.ndarray, u: np.ndarray,
                      z: np.ndarray, I_prime: np.ndarray,
-                     folder_name: str, epoch: int, score: float, plot_gif=False) -> None:
+                     folder_name: str, 
+                     epoch: int, iteration: int, active_idx: int, winner_idx: int,
+                     score: float, plot_gif=False, idx_folders=False) -> None:
         '''
         Plots the final resulting doodle and the variable activity graph of the ring layer. 
             The plots are saved to directory: `folder_name`\\`epoch` if plot_gif is True.
@@ -330,6 +422,7 @@ class CodeRingNetwork:
             If not being plotted, will be [].
         :param folder_name str: the model instance's corresponding folder name
         :param epoch int: the current epoch
+        :param active_idx int: the index of the active map neuron
         :param score float: the score of the outputted doodle
         :param plot_gif bool: whether to plot a GIF for each episode. This is used to determine the trial's folder structure.
 
@@ -340,15 +433,23 @@ class CodeRingNetwork:
         self.plot_final_doodle(axs[0], xs, ys, intersec_pts)
         self.plot_activity(axs[1], ring_inputs, v, u, z, I_prime)
 
-        f.suptitle(f'Epoch {epoch} - Score = {np.round(score,3)}', fontsize=14)
+        f.suptitle(f'Epoch {epoch}, Iteration {iteration}\n\
+                   Score = {np.round(score,2)} | Active = {active_idx} | Winner = {winner_idx}',
+                   fontsize=12)
+        plt.tight_layout()
+        
         if plot_gif:
             if not os.path.isdir(f'{folder_name}\\{epoch}'):
                 os.makedirs(f'{folder_name}\\{epoch}')
             f.savefig(f'{folder_name}\\{epoch}\\plot_{self.id_string}_epoch{epoch}')
+        elif idx_folders:
+            if not os.path.isdir(f'{folder_name}\\{active_idx}'):
+                os.makedirs(f'{folder_name}\\{active_idx}')
+            f.savefig(f'{folder_name}\\{active_idx}\\plot_{self.id_string}_idx{active_idx}_epoch{epoch}')
         else:
-            if not os.path.isdir(f'{folder_name}'):
-                os.mkdir(f'{folder_name}')
-            f.savefig(f'{folder_name}\\plot_{self.id_string}_epoch{epoch}')
+            if not os.path.isdir(f'{folder_name}\\plots'):
+                os.makedirs(f'{folder_name}\\plots')
+            f.savefig(f'{folder_name}\\plots\\plot_epoch{epoch}_iteration{iteration}_{self.id_string}')
 
         plt.close()
 
@@ -377,10 +478,11 @@ class CodeRingNetwork:
             # plot final pen point
             ax.scatter(xs[-1], ys[-1], alpha=0.8, marker = 'o', c='black', label='Final Point')
             # organize plot
-            ax.set_xlim([-1 * np.max(np.abs([xs, ys])), np.max(np.abs([xs, ys]))])
+            ax.set_xlim([-50, 50])
             ax.set_xlabel('x', fontsize = 14)
-            ax.set_ylim([-1 * np.max(np.abs([xs, ys])), np.max(np.abs([xs, ys]))])
+            ax.set_ylim([-50, 50])
             ax.set_ylabel('y', fontsize = 14)
+            ax.set_box_aspect(1)
             ax.set_title('Final Output')
             ax.legend()
             intersec_point_size = 20
@@ -503,8 +605,6 @@ class CodeRingNetwork:
 
         :returns None:
         '''
-        # TODO: we very occassionally still get random dots showing up on y=x. Doesn't seem like
-        # TODO: they're taken into account for metric scoring though, but not 100% sure.
         # create directories
         if not os.path.isdir(f'{folder_name}\\{epoch}\\img'):
             os.makedirs(f'{folder_name}\\{epoch}\\img')
@@ -538,6 +638,8 @@ class CodeRingNetwork:
 
         :returns (new_intersec np.ndarray, t float): intersection point encountered at timestep `t`    
         '''
+        # TODO: We very occassionally still get random dots showing up on y=x.
+        # TODO: They are a result of multiple intersections at one timestep. Should be fixed now.
         assert t >= 3, 'There must be at least 4 points to have any intersections'
         # get point 1 (time t-1) and point 2 (time t) coordinates
         x1 = xs[t-1]
@@ -567,8 +669,13 @@ class CodeRingNetwork:
         # get indexes where both t and u are between 0 and 1 - these points have intersections between the two line segments
         intersec_idxs = np.intersect1d(intersec_t_idxs, intersec_u_idxs)
 
+        if intersec_idxs.size != 0:
+            intersec_idx = intersec_idxs[0]
+        else:
+            return (np.empty((0,2)), None)
+
         # get the t-value for the intersection point
-        intersec_t = numerator_t[intersec_idxs] / denom[intersec_idxs]
+        intersec_t = numerator_t[intersec_idx] / denom[intersec_idx]
         
         # apply the t-value to the line equation to get the actual intersection coordinates
         intersec_x = x1 + (intersec_t * (x2 - x1))
@@ -577,12 +684,8 @@ class CodeRingNetwork:
         # if there is no intersection, new_intersec will be shape (0,2), so just an empty list
         # return that empty list, and use None for t_return to indicate no intersection
         new_intersec = np.array([intersec_x, intersec_y]).reshape(-1,2)
-        if new_intersec.shape[0] == 0:
-            t_return = None
-        else:
-            t_return = t
         
-        return new_intersec, t_return
+        return new_intersec, t
     
     def calc_doodle_len(self, xs: np.array, ys: np.array) -> float:
         '''
@@ -600,7 +703,7 @@ class CodeRingNetwork:
         doodle_len = np.sum(dists)
         return doodle_len
     
-    def evaluate(self, x_series: np.ndarray, y_series: np.ndarray, t_steps: int) -> tuple[float, np.array, np.ndarray, np.array]:
+    def evaluate(self, x_series: np.ndarray, y_series: np.ndarray, t_steps: int, **metric_kwargs) -> tuple[float, np.array, np.ndarray, np.array]:
         '''
         Gets the intersection points, curvature values, and total metric score of a doodle,
             and returns the 4-tuple of score, curvatures, intersection points, intersection times.
@@ -624,38 +727,38 @@ class CodeRingNetwork:
                 intersec_pts = np.concatenate((intersec_pts, new_intersec), axis=0)
                 intersec_times = np.append(intersec_times, intersec_t)
 
-            curvatures += [curvature(x1=x_series[t_cur-2], y1=y_series[t_cur-2],
-                                        x2=x_series[t_cur-1], y2=y_series[t_cur-1],
-                                        x3=x_series[t_cur], y3=y_series[t_cur])]
+            # curvatures += [curvature(x1=x_series[t_cur-2], y1=y_series[t_cur-2],
+            #                             x2=x_series[t_cur-1], y2=y_series[t_cur-1],
+            #                             x3=x_series[t_cur], y3=y_series[t_cur])]
             
-        curvatures = np.array(curvatures)
+        curvatures = np.array(diff_curvature(x_series, y_series))
+        sharp_curv_count = np.count_nonzero(np.abs(curvatures) > metric_kwargs['max_curv'])
             
         doodle_length = self.calc_doodle_len(x_series, y_series)
-        score = self.metric(curvatures, len(intersec_times), doodle_length)
-        return score, curvatures, intersec_pts, intersec_times
+        score = self.metric(sharp_curv_count, len(intersec_times), doodle_length, **metric_kwargs)
+        return score, sharp_curv_count, intersec_pts, intersec_times
 
-    def metric(self, curvatures: np.array, num_intersecs: int, doodle_length: float) -> float:
+    def metric(self, num_sharp_curvs: int, num_intersecs: int, doodle_length: float, **metric_kwargs) -> float:
         '''
-        The metric based on which doodles are evaluated. Combines an average curvature score 
+        The metric on which doodles are evaluated. Combines an average curvature score 
             with the ratio of intersection points to determine an overall quality score of a doodle.
 
-        :param curvatures np.array: the curvature values for each discretized line segment of the doodle
+        :param num_sharp_curvs int: the curvature values for each discretized line segment of the doodle
         :param num_intersecs int: the number of intersection points occurring in the doodle
         :param doodle_length float: total length of doodle
 
         :returns score float: the combined metric score of the given doodle
         '''
-        avg_curv_subscore = (np.sum(gaussian(curvatures,
-                                mean=self.ideal_curvature, sd=self.curvature_sd)) /
-                                len(curvatures))
-        intersec_score = exponential(num_intersecs, rate=self.intersec_rate, init_val=1)
-        length_score = sigmoid(doodle_length, beta=self.doodle_len_beta, mu=self.min_doodle_len) # TODO: parameterize these
-        score = avg_curv_subscore * intersec_score * length_score
+        curv_penalty = exponential(num_sharp_curvs, rate=metric_kwargs['curv_penalty_rate'], init_val=1)
+        intersec_score = exponential(num_intersecs, rate=metric_kwargs['intersec_penalty_rate'], init_val=1)
+        length_score = sigmoid(doodle_length, beta=metric_kwargs['doodle_len_beta'], mu=metric_kwargs['min_doodle_len'])
+
+        score = curv_penalty * intersec_score * length_score # sigmoid(curv_penalty * intersec_score * length_score, beta=metric_kwargs['score_beta'], mu=metric_kwargs['score_mu'])
         return score
     
 if __name__ == '__main__':
     ring_neurons = 36
-    weight_RC_spread = 0.002
+    weight_RC_spread = 0.02
 
     code_factor = 1
     code_neurons = code_factor*ring_neurons
@@ -663,87 +766,78 @@ if __name__ == '__main__':
     duration_neurons = 36
     durs = 0.2
 
-    map_neurons_d1 = 8
-    map_neurons_d2 = 8
-    weight_CR_min = 0.0
-    weight_CR_max = 1.0
+    map_neurons_d1 = 12
+    map_neurons_d2 = 12
+    weight_MC_min = 0.0
+    weight_MC_max = 1.0
     map_activity_sigma = 0.8
 
-    tmax = 30
-    tsteps = 300
+    tmax = 100
+    tsteps = 1000
 
-    pretrain_epochs = 5000
-    pretrain_lr = 0.05
-    pretrain_nhood_sigma = map_neurons_d1 / 3
-
-    train_epochs = 45000
-    train_init_lr = 0.01
-    train_lr_decay = 0.0
-    train_init_map_sigma = map_neurons_d1 / 3
-    train_nhood_decay = -1 * np.log(train_init_map_sigma) / 5000
+    train_epochs = 1000
+    train_init_lr = 0.1
+    train_lr_decay = -0.003
+    train_init_map_sigma = 2
+    train_nhood_decay = -0.001
     train_init_delta = 1.0
-    delta_exp_decay_rate = -0.0001
+    delta_exp_decay_rate = -0.002
 
-    for doodle_length in [1,2,5,6,8,10]:
-        crn = CodeRingNetwork(num_ring_units=ring_neurons,
+    crn = CodeRingNetwork(num_ring_units=ring_neurons,
                         num_code_units=code_neurons,
                         code_factor=code_factor,
                         num_dur_units=duration_neurons,
                         map_d1=map_neurons_d1, map_d2=map_neurons_d2,
-                        weight_min=weight_CR_min, weight_max=weight_CR_max,
+                        weight_min=weight_MC_min, weight_max=weight_MC_max,
                         code_ring_spread=weight_RC_spread)
-        
-        crn.ideal_doodle_len = doodle_length
-            
-        crn.id_string = crn.folder_name.split('\\')[-1] + f'doodle_len-{doodle_length}'
-        plt.ioff()
 
-        crn.show_map_results(f'{crn.folder_name}\\initial_outputs_{crn.id_string}.png', durs, tmax, tsteps)
+    # plot weights
+    plt.matshow(crn.map_layer.weights_to_code_from_map, vmin=0, vmax=1)
+    plt.colorbar()
+    plt.title(f'Initial Weights {crn.id_string}')
+    plt.xlabel('Map Neurons')
+    plt.ylabel('Code Neurons')
+    plt.savefig(f'{crn.folder_name}\\weights_at_initial_{crn.id_string}.png')
+    plt.close()
+    
+    train_scores = crn.train(train_epochs, map_activity_sigma, train_init_delta, delta_exp_decay_rate,
+                    train_init_map_sigma, train_nhood_decay,
+                    train_init_lr, train_lr_decay,
+                    durs, tmax, tsteps, plot_gif=False, plot_results=False)
 
-        pretrain_scores = crn.pretrain(pretrain_epochs, pretrain_nhood_sigma, pretrain_lr, durs, tmax, tsteps, plot_results=False, plot_gif=False)
-        # plot pretraining map
-        crn.show_map_results(f'{crn.folder_name}\\pretraining_outputs_{crn.id_string}.png', durs, tmax, tsteps)
-        # plot pretraining weights
-        plt.matshow(crn.map_layer.weights_to_map_from_code)
-        plt.colorbar()
-        plt.savefig(f'{crn.folder_name}\\pretraining_weights_{crn.id_string}.png')
-        plt.close()
+    # plot weights
+    plt.matshow(crn.map_layer.weights_to_code_from_map, vmin=0, vmax=1)
+    plt.colorbar()
+    plt.title(f'Final Weights {crn.id_string}')
+    plt.xlabel('Map Neurons')
+    plt.ylabel('Code Neurons')
+    plt.savefig(f'{crn.folder_name}\\weights_final_{crn.id_string}.png')
+    plt.close()
 
-        train_scores = crn.train(train_epochs, map_activity_sigma, train_init_delta, delta_exp_decay_rate,
-                        train_init_map_sigma, train_nhood_decay,
-                        train_init_lr, train_lr_decay,
-                        durs, tmax, tsteps, plot_gif=False, plot_results=False)
-        crn.show_map_results(f'{crn.folder_name}\\final_outputs_{crn.id_string}.png', durs, tmax, tsteps)
-        
-        total_epochs = pretrain_epochs + train_epochs
-        all_scores = pretrain_scores + train_scores
-        running_mean_window = int(total_epochs / 100)
+    # plot score heatmap
+    plt.matshow(train_scores.T, vmin=0, vmax=1)
+    plt.colorbar()
+    plt.title(f'Scores Heatmap {crn.id_string}')
+    plt.savefig(f'{crn.folder_name}\\scores_heatmap_{crn.id_string}.png')
+    plt.close()
+    
+    epoch_scores = np.mean(train_scores, axis=1)
+    
+    # plot results timeseries
+    # plot score timeseries for each neuron
+    plt.plot(train_scores)
+    plt.plot(epoch_scores, label='Avg. Epoch Scores', linewidth=4, c='black')
+    plt.title(f'Neuron Scores Over Time {crn.id_string}')
+    plt.savefig(f'{crn.folder_name}\\scores_neurons_{crn.id_string}.png')
+    plt.close()
 
-        # plot results timeseries
-        # scatter all scores
-        plt.scatter(range(total_epochs), all_scores, label='Doodle Scores', s=1)
-        # plot running mean
-        plt.plot(np.convolve(all_scores, np.ones(running_mean_window)/running_mean_window, mode='valid'),
-                c='#ff7f0e', label='Running Mean', linewidth=2)
-        # show where map activity starts having an impact
-        plt.axvline(pretrain_epochs, c='black', label='Beginning of Map Influence')
-        plt.title(f'Scores Over Time {crn.id_string}')
-        plt.legend()
-        plt.savefig(f'{crn.folder_name}\\all_scores_{crn.id_string}.png')
-        plt.close()
-
-        # plot weights
-        plt.matshow(crn.map_layer.weights_to_map_from_code)
-        plt.colorbar()
-        plt.savefig(f'{crn.folder_name}\\final_weights_{crn.id_string}.png')
-        plt.close()
-
-    curv_min = crn.low_curv
-    curv_max = crn.high_curv
-    curvature_sd = crn.curvature_sd
-    intersec_rate = crn.intersec_rate
-    sigmoid_growth = crn.metric_sigmoid_growth
-    sigmoid_center = crn.metric_sigmoid_center
+    for idx in range(map_neurons_d1*map_neurons_d2):
+        plt.scatter(range(train_epochs), train_scores[:,idx])
+    plt.plot(epoch_scores, label='Avg. Epoch Score', c='black')
+    plt.title(f'Scores Over Time {crn.id_string}')
+    plt.legend()
+    plt.savefig(f'{crn.folder_name}\\scores_all_{crn.id_string}.png')
+    plt.close()
 
     write_params(f'{crn.folder_name}\\params_{crn.id_string}.txt', **locals())
     pass
