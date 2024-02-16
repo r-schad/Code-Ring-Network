@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
 class MapLayer():
     def __init__(self, map_d1: int, map_d2: int, num_ring_units: int, num_code_units: int,
@@ -133,12 +134,17 @@ class MapLayer():
 
         :returns: None
         '''
-        nhood_scores = self.neighborhood(winner, sigma=nhood_sigma).reshape(self.d1*self.d2, 1)
+        nhood_scores = self.neighborhood(winner, sigma=nhood_sigma).reshape(self.d1*self.d2, 1) - 0.05 # antihebbian learning
+
         effective_lr = learning_rate * score
         weight_changes = (nhood_scores * effective_lr *
-                          np.subtract(input_vec.T, self.weights_to_map_from_code))
+                          np.subtract(input_vec.T, self.weights_to_map_from_code) ) # * 
+                        #   self.weights_to_map_from_code * (1 - self.weights_to_map_from_code))
         
         self.weights_to_map_from_code += weight_changes # this updates both weight matrices
+        # # clip weights (in both weight matrices) if growing beyond [0,1] (necessary only with antihebbian learning)
+        # np.place(self.weights_to_map_from_code, (self.weights_to_map_from_code > 1.0), 1.0)
+        # np.place(self.weights_to_map_from_code, (self.weights_to_map_from_code < 0.0), 0.0)
 
     def forward(self, code_activity: np.array) -> tuple:
         '''
@@ -149,7 +155,7 @@ class MapLayer():
 
         :returns winner_coords tuple: the (i, j) coordinates of the winning neuron
         '''
-        norms = np.linalg.norm(code_activity.T - self.weights_to_map_from_code, axis=0)
+        norms = np.linalg.norm(code_activity.T - self.weights_to_map_from_code, axis=1)
         winner_index = int(np.argmin(norms))
         winner_coords = self.convert_to_coord(winner_index)
 
