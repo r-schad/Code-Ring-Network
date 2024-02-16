@@ -123,8 +123,8 @@ class RingLayer:
 
         # scale x and y distances by 1/10 to keep drawings on the page
         # TODO: should 1/10 be a variable?
-        xs_with_momentum = (1 / 10) * dir_series_with_momentum_x
-        ys_with_momentum = (1 / 10) * dir_series_with_momentum_y
+        xs_with_momentum = dir_series_with_momentum_x # * (1/10)
+        ys_with_momentum = dir_series_with_momentum_y # * (1/10)
 
         # calculate cumulative location of pen over time
         x_series_with_momentum = np.cumsum(xs_with_momentum)
@@ -132,7 +132,7 @@ class RingLayer:
 
         return (x_series_with_momentum, y_series_with_momentum)
         
-    def doodle(self, t: np.ndarray, code_values: np.ndarray,
+    def doodle(self, t: np.ndarray, ring_input: np.ndarray,
                dur_values: np.ndarray, state: np.ndarray) -> np.ndarray:
         '''
         Calculates the rate of change of the ring layer variables over time. This is the 
@@ -148,7 +148,7 @@ class RingLayer:
         :param t np.ndarray: array of the timestep values to integrate over
             (per solve_ivp() documentation, t is a necessary parameter for the function being applied to solve_ivp().
             but should not be used in the function)
-        :param code_values np.ndarray: input values provided by the code layer
+        :param ring_input np.ndarray: input values provided by the code layer
         :param dur_values np.ndarray: input values provided by the duration layer
         :param state np.ndarray: array of shape (3*N) containing v, u, and I' vectors
             state is defined by [v_0, ..., v_N-1, u_0, ..., u_N-1, I'_0, ..., I'_N-1]
@@ -166,12 +166,12 @@ class RingLayer:
 
         assert set([v.shape[0], u.shape[0], I_prime.shape[0]]) == set([self.num_ring_units]), f"State's shapes don't match! {v.shape, u.shape, I_prime.shape}"
 
-        z = sigmoid(v, self.beta, self.mu)   
+        z = sigmoid(v, self.beta, self.mu)
         # calculate dv/dt, du/dt, DI'/dt
         inhibition_vec = 1 - (self.psi * np.dot(z, 1 - np.eye(self.num_ring_units))) # multiply by the sum of *other* neuron's outputs
         dv = (1 / self.tau) * ((-1 * self.lambda_ * u * v) + (I_prime * inhibition_vec))
         du = (-1 * self.rho * u) + (self.gamma * I_prime * (z) / (dur_values + self.epsilon))
-        dI_prime = -1 * self.phi * code_values * z
+        dI_prime = -1 * self.phi * ring_input * z
         
         # join v, u, and I' back together to be returned
         new_state = np.array((dv, du, dI_prime)).reshape(3*self.num_ring_units)
