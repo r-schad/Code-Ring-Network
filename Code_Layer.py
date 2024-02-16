@@ -53,7 +53,7 @@ class CodeLayer:
         temp_gauss_arr = np.linspace(0, 1.0, self.num_ring_units)
         # get gaussian pdf values - with standard deviation `scale`
         weight_vals = norm.pdf(temp_gauss_arr, loc=temp_gauss_arr[len(temp_gauss_arr)//2], scale=scale)
-        # scale weight vals down so peak is 1.0
+        # scale weight vals down so weight rows sum to 1.0
         weight_vals_std = weight_vals / np.sum(weight_vals)
         # roll weight vals so peak is at index 0
         weight_vals_rolled = np.roll(weight_vals_std, -1 * np.argmax(weight_vals_std))
