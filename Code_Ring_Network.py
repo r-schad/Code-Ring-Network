@@ -422,9 +422,13 @@ class CodeRingNetwork:
             If not being plotted, will be [].
         :param folder_name str: the model instance's corresponding folder name
         :param epoch int: the current epoch
+        :param iteration int: the current iteration within the current epoch
         :param active_idx int: the index of the active map neuron
+        :param winner_idx int: the index of the winner map neuron
         :param score float: the score of the outputted doodle
-        :param plot_gif bool: whether to plot a GIF for each episode. This is used to determine the trial's folder structure.
+        :param plot_gif bool: whether to plot a GIF for each episode. This is used to determine the trial's folder structure
+        :param idx_folders bool: whether each active map neuron's iterations should be kept in a separate folder or not.
+            NOTE: this gives greater clarity in the way one neuron may learn over time.
 
         :returns: None
         '''
