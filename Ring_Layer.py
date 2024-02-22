@@ -115,16 +115,11 @@ class RingLayer:
         # recurrence relation boils down to the following momentum term
         # convolution(N, M) gives a result of n + m - 1 elements. we only need the first t_steps
         # TODO: turn the recurrence relation back to a loop. or maybe at least compare performance/time between the two
-        dir_series_with_momentum_x = ((1 - self.alpha) * (z_series.T @ self.headings).T[0,:] +
+        xs_with_momentum = ((1 - self.alpha) * (z_series.T @ self.headings).T[0,:] +
                                      (1 - self.alpha) * np.convolve((z_series.T @ self.headings).T[0,:], alphas)[:t_steps])
         
-        dir_series_with_momentum_y = ((1 - self.alpha) * (z_series.T @ self.headings).T[1,:] +
+        ys_with_momentum = ((1 - self.alpha) * (z_series.T @ self.headings).T[1,:] +
                                      (1 - self.alpha) * np.convolve((z_series.T @ self.headings).T[1,:], alphas)[:t_steps])
-
-        # scale x and y distances by 1/10 to keep drawings on the page
-        # TODO: should 1/10 be a variable?
-        xs_with_momentum = dir_series_with_momentum_x # * (1/10)
-        ys_with_momentum = dir_series_with_momentum_y # * (1/10)
 
         # calculate cumulative location of pen over time
         x_series_with_momentum = np.cumsum(xs_with_momentum)
