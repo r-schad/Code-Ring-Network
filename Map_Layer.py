@@ -29,7 +29,17 @@ class MapLayer():
 
         self.neurons = np.array([[[i,j] for j in range(self.d1)] for i in range(self.d2)])
         self.dist_arrays = self.get_distances_for_all_neurons()
-        self.weights_to_code_from_map = np.random.uniform(low=weight_min, high=weight_max, size=(num_code_units, int(map_d1*map_d2)))
+        self.weights_to_code_from_map = np.random.uniform(0.0, 0.2, size=(num_code_units, int(map_d1*map_d2)))
+        # self.weights_to_code_from_map = np.ndarray((num_code_units, int(map_d1*map_d2)))
+        # for m in range(int(map_d1*map_d2)):
+        #     noise_rate = 8
+        #     noise1 = np.random.exponential(1 / noise_rate, 3*self.num_code_units//4)
+        #     noise2 = 1 - np.random.exponential(1 / noise_rate, self.num_code_units//4)
+        #     noise = np.concatenate((noise1, noise2))
+        #     np.random.shuffle(noise)
+        #     code_noise = np.clip(noise, 0, 1)
+        #     self.weights_to_code_from_map[:,m] = code_noise
+        # self.weights_to_code_from_map = np.random.uniform(low=weight_min, high=weight_max, size=(num_code_units, int(map_d1*map_d2)))
         # defines a `view` of original array - they point to same memory - between W_CM and W_MC
         self.weights_to_map_from_code = self.weights_to_code_from_map.T
 
@@ -138,13 +148,10 @@ class MapLayer():
 
         effective_lr = learning_rate * score
         weight_changes = (nhood_scores * effective_lr *
-                          np.subtract(input_vec.T, self.weights_to_map_from_code) ) # * 
-                        #   self.weights_to_map_from_code * (1 - self.weights_to_map_from_code))
+                          np.subtract(input_vec.T, self.weights_to_map_from_code) *
+                          self.weights_to_map_from_code * (1 - self.weights_to_map_from_code))
         
         self.weights_to_map_from_code += weight_changes # this updates both weight matrices
-        # # clip weights (in both weight matrices) if growing beyond [0,1] (necessary only with antihebbian learning)
-        # np.place(self.weights_to_map_from_code, (self.weights_to_map_from_code > 1.0), 1.0)
-        # np.place(self.weights_to_map_from_code, (self.weights_to_map_from_code < 0.0), 0.0)
 
     def forward(self, code_activity: np.array) -> tuple:
         '''
