@@ -69,7 +69,7 @@ def area_of_triangle(x1: float, y1: float, x2: float, y2: float, x3: float, y3: 
     ))
     return area
 
-def dist(xi: float, yi: float, xj: float ,yj: float) -> float:
+def dist(xi: float, yi: float, xj: float, yj: float) -> float:
     '''
     Computes distance between 2 (x, y) coordinate points.
 
@@ -101,6 +101,15 @@ def curvature(x1: float, y1: float, x2: float, y2: float, x3: float, y3: float) 
         (dist(x1, y1, x2, y2) * dist(x2, y2, x3, y3) * dist(x3, y3, x1, y1))
     )
     return curv
+
+def diff_curvature(xs, ys):
+    dx = np.diff(xs, prepend=0)
+    dx2 = np.diff(xs, 2, prepend=[0,0])
+    dy = np.diff(ys, prepend=0)
+    dy2 = np.diff(ys, 2, prepend=[0,0])
+    top = np.abs((dx * dy2) - (dy * dx2))
+    bottom = np.power((np.square(dx) + np.square(dy)), 3/2)
+    return np.abs(np.diff(top / bottom, prepend=0))
 
 def write_params(filename, **kwargs):
     with open(filename, 'w') as f:
