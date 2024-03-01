@@ -109,10 +109,11 @@ class CodeRingNetwork:
             noise = np.concatenate((noise1, noise2))
             np.random.shuffle(noise)
 
-            code_noise = np.clip(noise, 0, 1).reshape(self.code_layer.num_code_units, 1)
+            # code input is just noise during pretraining
+            code_input = np.clip(noise, 0, 1).reshape(self.code_layer.num_code_units, 1)
 
-            # code_activity is just noise during pretraining
-            code_output = code_noise
+            # do we want to min-max scale the noise? previously had no normalization for the good results
+            code_output = (code_input - min(code_input)) / (np.max(code_input) - np.min(code_input)) # TODO: do we want to min-max scale this?
 
             # determine output of code layer (input into ring layer)
             ring_input = (self.code_layer.weights_to_ring_from_code @ code_output).squeeze()
@@ -202,8 +203,17 @@ class CodeRingNetwork:
 
         :returns scores list: list of the scores of the doodles over time      
         '''
+        code_neuron_idxs = np.arange(0,self.code_layer.num_code_units)
         map_size = int(self.map_layer.d1 * self.map_layer.d2)
+        map_neuron_idxs = np.arange(map_size)
+
         scores = np.ndarray((num_epochs, map_size))
+        activity_counts = np.zeros((map_size, num_epochs))
+        winner_counts = np.zeros((map_size, num_epochs))
+
+        learning_rate = init_learning_rate
+        learning_nhood = init_learning_nhood
+        delta = init_delta
 
         self.show_map_results(f'{self.folder_name}\\map_train_begin{self.id_string}.png', durations, t_max, t_steps, **metric_kwargs)
         plt.matshow(self.map_layer.weights_to_code_from_map, vmin=0, vmax=1)
@@ -214,17 +224,10 @@ class CodeRingNetwork:
         plt.savefig(f'{self.folder_name}\\weights_train_begin_{self.id_string}.png')
         plt.close()
         
-        learning_rate = init_learning_rate
-        learning_nhood = init_learning_nhood
-        delta = init_delta
-        all_map_idxs = np.arange(map_size)
-        activity_counts = {m: 0 for m in all_map_idxs}
-        winner_counts = {m: 0 for m in all_map_idxs}
-        neuron_idxs = np.arange(0,self.code_layer.num_code_units)
         for epoch in tqdm(range(num_epochs)):
             # randomly shuffle the order of map neuron activations
-            np.random.shuffle(all_map_idxs)
-            for iteration, rand_active_idx in enumerate(tqdm(all_map_idxs)):
+            np.random.shuffle(map_neuron_idxs)
+            for iteration, rand_active_idx in enumerate(tqdm(map_neuron_idxs)):
                 rand_active_neuron = self.map_layer.convert_to_coord(rand_active_idx)
 
                 # apply static neighborhood range for activation neighborhood
@@ -247,17 +250,17 @@ class CodeRingNetwork:
                 # get the number of values in vector that will come from noise
                 num_noise = int(np.round(self.code_layer.num_code_units * delta, 0))
                 # get random indexes to be noise
-                noise_idxs = np.random.choice(neuron_idxs, size=num_noise, replace=False)
+                noise_idxs = np.random.choice(code_neuron_idxs, size=num_noise, replace=False)
                 # get all other (non-noise) indexes
                 # these indexes in the final code activity vector will come from the map influence
-                map_activity_idxs = np.setdiff1d(neuron_idxs, noise_idxs)
+                map_activity_idxs = np.setdiff1d(code_neuron_idxs, noise_idxs)
                 # define the code activity vector
                 code_input = np.ndarray((self.code_layer.num_code_units,1))
                 # fill in the noise indexes in code activity
                 code_input[noise_idxs] = code_noise[noise_idxs]
                 # fill in the map influence indexes in code activity
                 code_input[map_activity_idxs] = map_activation[map_activity_idxs]
-                code_output = code_input # TODO: do we want to min-max scale this?
+                code_output = (code_input - min(code_input)) / (np.max(code_input) - np.min(code_input)) # TODO: do we want to min-max scale this? previously had no normalization for the good results
                 
                 # determine output of code layer (input into ring layer)
                 ring_input = (self.code_layer.weights_to_ring_from_code @ code_output).squeeze()
@@ -287,9 +290,8 @@ class CodeRingNetwork:
 
                 print(f'Training Epoch {epoch} | Active Neuron {rand_active_idx} | Winner Neuron {winner_idx}: {score}')
                 scores[epoch][rand_active_idx] = score
-
-                activity_counts[rand_active_idx] += 1
-                winner_counts[winner_idx] += 1
+                activity_counts[epoch][rand_active_idx] += 1
+                winner_counts[epoch][winner_idx] += 1
 
                 # plot ring layer variables over time
                 plot_v = v_series if self.vars_to_plot['v'] else []
@@ -329,12 +331,21 @@ class CodeRingNetwork:
                 plt.close()
         
         self.show_map_results(f'{self.folder_name}\\map_train_final{self.id_string}.png', durations, t_max, t_steps, **metric_kwargs)
+
         plt.matshow(self.map_layer.weights_to_code_from_map, vmin=0, vmax=1)
         plt.colorbar()
         plt.title('Weights at Training Final')
         plt.xlabel('Map Neurons')
         plt.ylabel('Code Neurons')
         plt.savefig(f'{self.folder_name}\\weights_train_final_{self.id_string}.png')
+        plt.close()
+
+        plt.matshow(winner_counts.T)
+        plt.colorbar()
+        plt.title(f'Map Win Counts {self.id_string}')
+        plt.xlabel('Winning Map Neuron')
+        plt.ylabel('Epochs')
+        plt.savefig(f'{self.folder_name}\\map_win_counts_heatmap_{self.id_string}.png')
         plt.close()
 
         return scores
@@ -847,19 +858,19 @@ if __name__ == '__main__':
                         weight_min=weight_MC_min, weight_max=weight_MC_max,
                         code_ring_spread=weight_RC_spread)
 
-    pretrain_scores = crn.pretrain(num_epochs=pretrain_iterations, learning_sigma=pretrain_map_sigma, learning_rate=pretrain_lr,
-                                   durations=durs, t_max=tmax, t_steps=tsteps, plot_results=False,
-                                   max_curv=max_curv,
-                                   curv_penalty_rate=curv_penalty_rate, 
-                                   intersec_penalty_rate=intersec_penalty_rate, 
-                                   doodle_len_beta=doodle_len_beta, 
-                                   min_doodle_len=min_doodle_len, 
-                                   metric_init_mu=metric_init_mu, 
-                                   metric_mu_decay=metric_mu_decay, 
-                                   score_mu=score_mu, 
-                                   metric_init_beta=metric_init_beta, 
-                                   metric_beta_decay=metric_beta_decay, 
-                                   score_beta=score_beta)
+    # pretrain_scores = crn.pretrain(num_epochs=pretrain_iterations, learning_sigma=pretrain_map_sigma, learning_rate=pretrain_lr,
+    #                                durations=durs, t_max=tmax, t_steps=tsteps, plot_results=False,
+    #                                max_curv=max_curv,
+    #                                curv_penalty_rate=curv_penalty_rate, 
+    #                                intersec_penalty_rate=intersec_penalty_rate, 
+    #                                doodle_len_beta=doodle_len_beta, 
+    #                                min_doodle_len=min_doodle_len, 
+    #                                metric_init_mu=metric_init_mu, 
+    #                                metric_mu_decay=metric_mu_decay, 
+    #                                score_mu=score_mu, 
+    #                                metric_init_beta=metric_init_beta, 
+    #                                metric_beta_decay=metric_beta_decay, 
+    #                                score_beta=score_beta)
        
     train_scores = crn.train(train_epochs, map_activity_sigma, train_init_delta, delta_exp_decay_rate,
                     train_init_map_sigma, train_nhood_decay,
@@ -881,14 +892,16 @@ if __name__ == '__main__':
     plt.matshow(train_scores.T, vmin=0, vmax=1)
     plt.colorbar()
     plt.title(f'Scores Heatmap {crn.id_string}')
+    plt.xlabel('Activated Map Neuron')
+    plt.ylabel('Epoch')
     plt.savefig(f'{crn.folder_name}\\scores_heatmap_{crn.id_string}.png')
     plt.close()
     
-    epoch_scores = np.mean(train_scores, axis=1)
     
     # plot results timeseries
     # plot score timeseries for each neuron
     plt.plot(train_scores)
+    epoch_scores = np.mean(train_scores, axis=1)
     plt.plot(epoch_scores, label='Avg. Epoch Scores', linewidth=4, c='black')
     plt.title(f'Neuron Scores Over Time {crn.id_string}')
     plt.savefig(f'{crn.folder_name}\\scores_neurons_{crn.id_string}.png')
