@@ -29,17 +29,19 @@ class MapLayer():
 
         self.neurons = np.array([[[i,j] for j in range(self.d1)] for i in range(self.d2)])
         self.dist_arrays = self.get_distances_for_all_neurons()
-        self.weights_to_code_from_map = np.random.uniform(0.0, 0.2, size=(num_code_units, int(map_d1*map_d2)))
-        # self.weights_to_code_from_map = np.ndarray((num_code_units, int(map_d1*map_d2)))
-        # for m in range(int(map_d1*map_d2)):
-        #     noise_rate = 8
-        #     noise1 = np.random.exponential(1 / noise_rate, 3*self.num_code_units//4)
-        #     noise2 = 1 - np.random.exponential(1 / noise_rate, self.num_code_units//4)
-        #     noise = np.concatenate((noise1, noise2))
-        #     np.random.shuffle(noise)
-        #     code_noise = np.clip(noise, 0, 1)
-        #     self.weights_to_code_from_map[:,m] = code_noise
+        # TODO: determine method of weight init. good trials were just uniform [0,1] but pretraining dragged everything towards 0 anyways
+        # self.weights_to_code_from_map = np.random.uniform(0.0, 0.2, size=(num_code_units, int(map_d1*map_d2)))
         # self.weights_to_code_from_map = np.random.uniform(low=weight_min, high=weight_max, size=(num_code_units, int(map_d1*map_d2)))
+        self.weights_to_code_from_map = np.ndarray((num_code_units, int(map_d1*map_d2)))
+        # initialize weights with exponential distribution (same as noise generating process)
+        for m in range(int(map_d1*map_d2)):
+            noise_rate = 8
+            noise1 = np.random.exponential(1 / noise_rate, 3*self.num_code_units//4)
+            noise2 = 1 - np.random.exponential(1 / noise_rate, self.num_code_units//4)
+            noise = np.concatenate((noise1, noise2))
+            np.random.shuffle(noise)
+            code_noise = np.clip(noise, 0, 1)
+            self.weights_to_code_from_map[:,m] = code_noise
         # defines a `view` of original array - they point to same memory - between W_CM and W_MC
         self.weights_to_map_from_code = self.weights_to_code_from_map.T
 
@@ -144,7 +146,7 @@ class MapLayer():
 
         :returns: None
         '''
-        nhood_scores = self.neighborhood(winner, sigma=nhood_sigma).reshape(self.d1*self.d2, 1) - 0.05 # antihebbian learning
+        nhood_scores = self.neighborhood(winner, sigma=nhood_sigma).reshape(self.d1*self.d2, 1) - 0.02 # antihebbian learning
 
         effective_lr = learning_rate * score
         weight_changes = (nhood_scores * effective_lr *
