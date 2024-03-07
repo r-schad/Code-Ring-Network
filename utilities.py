@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 
+EPSILON = np.finfo(np.float64).eps
+
 def sigmoid(v: (float, np.ndarray), beta: float = 50.0, mu: float = 0.1) -> (float, np.ndarray):
     '''
     Returns a sigmoid output with steepness beta centered at mu.
@@ -17,7 +19,7 @@ def sigmoid(v: (float, np.ndarray), beta: float = 50.0, mu: float = 0.1) -> (flo
         output = 1 / (1 + (np.exp((-1*beta) * (v - mu))))
     except RuntimeWarning:
         print(f'Overflow - v={v}')
-    return output
+    return np.where(output < EPSILON, EPSILON, output) # return anything ungodly low to be an epsilon value so we don't divide by 0 later
 
 def gaussian(x: (float, np.ndarray), mean: float = 0.2, sd: float = 0.2, peak: float = 1.0) -> (float, np.ndarray):
     '''
