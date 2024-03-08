@@ -5,6 +5,12 @@ from scipy.integrate import solve_ivp
 
 from utilities import sigmoid
 
+def event_attr():
+    def decorator(func):
+        func.terminal = True
+        return func
+    return decorator
+
 class RingLayer:
     '''
     A class implementing a ring layer that can draw an output given an input signal.
@@ -83,7 +89,7 @@ class RingLayer:
         t = np.linspace(0, t_max, t_steps)
 
         # integrate model over discretized timesteps
-        result = solve_ivp(fun=lambda t, state: self.doodle(t, input_from_code, dur_outputs, state), t_span=(min(t), max(t)), t_eval=t, y0=state)
+        result = solve_ivp(fun=lambda t, state: self.doodle(t, input_from_code, dur_outputs, state), t_span=(min(t), max(t)), dense_output=True, y0=state, event=self.stop_drawing)
         if not result.success:
             return 0
         v_series = result.y[:self.num_ring_units,]
@@ -92,7 +98,12 @@ class RingLayer:
         I_prime_series = result.y[2*self.num_ring_units:,]
 
         return v_series, z_series, u_series, I_prime_series
-
+    
+    @event_attr()
+    def stop_drawing(self, t, state):
+        I_prime_series = state[2*self.num_ring_units:]
+        return np.max(I_prime_series) - 0.05
+        
     def create_drawing(self, z_series: np.ndarray, t_steps: int) -> tuple:
         '''
         Applies the outputs of the model to create a doodle produced by the drawing mechanism.
@@ -113,7 +124,7 @@ class RingLayer:
         alphas = np.array([0] + list(alphas))
 
         # recurrence relation boils down to the following momentum term
-        # convolution(N, M) gives a result of n + m - 1 elements. we only need the first t_steps
+        # convolve(N, M) gives a result of n + m - 1 elements. we only need the first t_steps
         # TODO: turn the recurrence relation back to a loop. or maybe at least compare performance/time between the two
         xs_with_momentum = ((1 - self.alpha) * (z_series.T @ self.headings).T[0,:] +
                                      (1 - self.alpha) * np.convolve((z_series.T @ self.headings).T[0,:], alphas)[:t_steps])

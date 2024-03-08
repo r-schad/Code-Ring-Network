@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 
+EPSILON = np.finfo(np.float64).eps
+
 def sigmoid(v: (float, np.ndarray), beta: float = 50.0, mu: float = 0.1) -> (float, np.ndarray):
     '''
     Returns a sigmoid output with steepness beta centered at mu.
@@ -12,7 +14,7 @@ def sigmoid(v: (float, np.ndarray), beta: float = 50.0, mu: float = 0.1) -> (flo
 
     :returns output (float, np.ndarray): value or array of sigmoid output
     '''
-
+    v = np.where(v < EPSILON, EPSILON, v)
     try:
         output = 1 / (1 + (np.exp((-1*beta) * (v - mu))))
     except RuntimeWarning:
@@ -48,6 +50,18 @@ def exponential(t: (float, np.ndarray), rate: float, init_val: float, center: fl
     '''
     output = init_val * np.exp(rate * (t - center))
     return output
+
+def bimodal_exponential_noise(num_low, num_high, noise_rate):
+    '''
+    Returns a shuffled vector of noise values clipped to [0,1]. Returned vector is in the shape (num_low + num_high, 1).
+    '''
+    noise1 = np.random.exponential(1 / noise_rate, num_low)
+    noise2 = 1 - np.random.exponential(1 / noise_rate, num_high)
+    noise = np.concatenate((noise1, noise2))
+    np.random.shuffle(noise)
+
+    clipped_noise = np.clip(noise, 0, 1)
+    return clipped_noise
 
 def area_of_triangle(x1: float, y1: float, x2: float, y2: float, x3: float, y3: float) -> float:
     '''
