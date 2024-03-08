@@ -1,9 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+from utilities import bimodal_exponential_noise
+
 class MapLayer():
     def __init__(self, map_d1: int, map_d2: int, num_ring_units: int, num_code_units: int,
-                 weight_min: float, weight_max: float) -> None:
+                 noise_rate: float, noise_num_high: float) -> None:
         '''
         A class implementing a Self-Organizing Feature Map (SOFM) as the foundation of the
           Code Ring Network. 
@@ -35,13 +37,9 @@ class MapLayer():
         self.weights_to_code_from_map = np.ndarray((num_code_units, int(map_d1*map_d2)))
         # initialize weights with exponential distribution (same as noise generating process)
         for m in range(int(map_d1*map_d2)):
-            noise_rate = 8
-            noise1 = np.random.exponential(1 / noise_rate, 3*self.num_code_units//4)
-            noise2 = 1 - np.random.exponential(1 / noise_rate, self.num_code_units//4)
-            noise = np.concatenate((noise1, noise2))
-            np.random.shuffle(noise)
-            code_noise = np.clip(noise, 0, 1)
-            self.weights_to_code_from_map[:,m] = code_noise
+            self.weights_to_code_from_map[:,m] = bimodal_exponential_noise(num_low=(self.num_code_units-noise_num_high), 
+                                                                           num_high=noise_num_high, 
+                                                                           noise_rate=noise_rate)
         # defines a `view` of original array - they point to same memory - between W_CM and W_MC
         self.weights_to_map_from_code = self.weights_to_code_from_map.T
 
