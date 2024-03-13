@@ -238,32 +238,47 @@ class CodeRingNetwork:
             for iteration, rand_active_idx in enumerate(tqdm(map_neuron_idxs)):
                 rand_active_neuron = self.map_layer.convert_to_coord(rand_active_idx)
 
-                # apply static neighborhood range for activation neighborhood
-                # to activate the neighborhood around the winner
-                map_signal = self.map_layer.neighborhood(rand_active_neuron, sigma=activation_nhood)
+                # # apply static neighborhood range for activation neighborhood
+                # # to activate the neighborhood around the winner
+                # map_signal = self.map_layer.neighborhood(rand_active_neuron, sigma=activation_nhood)
                 
-                # propagate map signal forward
-                map_activation = self.map_layer.weights_to_code_from_map @ map_signal.reshape(map_size, 1)
+                # # propagate map signal forward
+                # map_activation = self.map_layer.weights_to_code_from_map @ map_signal.reshape(map_size, 1)
 
-                code_noise = bimodal_exponential_noise(num_low=(self.code_layer.num_code_units-self.noise_num_high),
-                                                   num_high=self.noise_num_high,
-                                                   noise_rate=self.noise_rate).reshape(self.code_layer.num_code_units,1)
+                # code_noise = bimodal_exponential_noise(num_low=(self.code_layer.num_code_units-self.noise_num_high),
+                #                                    num_high=self.noise_num_high,
+                #                                    noise_rate=self.noise_rate).reshape(self.code_layer.num_code_units, 1)
 
-                ### noise vs map influence calculation ###
-                # get the number of values in vector that will come from noise
-                num_noise = int(np.round(self.code_layer.num_code_units * delta, 0))
-                # get random indexes to be noise
-                noise_idxs = np.random.choice(code_neuron_idxs, size=num_noise, replace=False)
-                # get all other (non-noise) indexes
-                # these indexes in the final code activity vector will come from the map influence
-                map_activity_idxs = np.setdiff1d(code_neuron_idxs, noise_idxs)
-                # define the code activity vector
-                code_input = np.ndarray((self.code_layer.num_code_units,1))
-                # fill in the noise indexes in code activity
-                code_input[noise_idxs] = code_noise[noise_idxs]
-                # fill in the map influence indexes in code activity
-                code_input[map_activity_idxs] = map_activation[map_activity_idxs]
-                code_output = np.where(code_input >= 0.05, code_input, 0.0) # (code_input - min(code_input)) / (np.max(code_input) - np.min(code_input)) # TODO: do we want to min-max scale this? previously had no normalization for the good results
+                # ## noise vs map influence calculation ###
+                # # get the number of values in vector that will come from noise
+                # num_noise = int(np.round(self.code_layer.num_code_units * delta, 0))
+                # # get random indexes to be noise
+                # noise_idxs = np.random.choice(code_neuron_idxs, size=num_noise, replace=False)
+                # # get all other (non-noise) indexes
+                # # these indexes in the final code activity vector will come from the map influence
+                # map_activity_idxs = np.setdiff1d(code_neuron_idxs, noise_idxs)
+                # # define the code activity vector
+                # code_input = np.ndarray((self.code_layer.num_code_units, 1))
+                # # fill in the noise indexes in code activity
+                # code_input[noise_idxs] = code_noise[noise_idxs]
+                # # fill in the map influence indexes in code activity
+                # code_input[map_activity_idxs] = map_activation[map_activity_idxs]
+
+                # top_idxs = np.argsort(code_input.flatten())[-metric_kwargs['num_desired_high']:]
+                # code_output = np.zeros((self.code_layer.num_code_units, 1))
+                # code_output[top_idxs] = code_input[top_idxs]
+
+                ideal = np.concatenate((np.linspace(1.0, 0.1, metric_kwargs['num_desired_high']), np.zeros(self.code_layer.num_code_units-metric_kwargs['num_desired_high'])))
+                random_roll = np.random.randint(0, self.code_layer.num_code_units)
+                flip_vector = np.random.randint(0,2)
+
+                if flip_vector:
+                    code_input = np.flip(np.roll(ideal, random_roll))
+                else:
+                    code_input = np.roll(ideal, random_roll)
+
+
+                code_output = np.where(code_input >= metric_kwargs['min_activity_value'], code_input, 0.0) # (code_input - min(code_input)) / (np.max(code_input) - np.min(code_input)) # TODO: do we want to min-max scale this? previously had no normalization for the good results
                 
                 # determine output of code layer (input into ring layer)
                 ring_input = (self.code_layer.weights_to_ring_from_code @ code_output).squeeze()
@@ -402,7 +417,11 @@ class CodeRingNetwork:
             (r, c) = self.map_layer.convert_to_coord(i)
             activity_matrix[r, c] = 1.0
             code_input = self.map_layer.weights_to_code_from_map @ activity_matrix.reshape(map_size, 1)
-            code_output = np.where(code_input >= 0.05, code_input, 0.0)
+
+            # top_idxs = np.argsort(code_input.flatten())[-metric_kwargs['num_desired_high']:]
+            # code_output = np.zeros((self.code_layer.num_code_units, 1))
+            # code_output[top_idxs] = code_input[top_idxs]
+            code_output = np.where(code_input >= metric_kwargs['min_activity_value'], code_input, 0.0)
 
             # determine output of code layer (input into ring layer)
             ring_input = self.code_layer.weights_to_ring_from_code @ code_output
@@ -446,8 +465,8 @@ class CodeRingNetwork:
                                             
             # generate drawing for current neuron
             self.plot_final_doodle(ax=axs[r][c], xs=x_series, ys=y_series, intersec_pts=intersec_pts, individualize_plot=False)
-            axs[r][c].set_xlim([-50,50])
-            axs[r][c].set_ylim([-50,50])
+            axs[r][c].set_xlim([-100,100])
+            axs[r][c].set_ylim([-100,100])
             axs[r][c].set_xlabel(f'{np.round(score,3)}')
             axs[r][c].set_box_aspect(1)
 
@@ -544,9 +563,9 @@ class CodeRingNetwork:
             # plot final pen point
             ax.scatter(xs[-1], ys[-1], alpha=0.8, marker = 'o', c='black', label='Final Point')
             # organize plot
-            ax.set_xlim([-50,50])
+            ax.set_xlim([-100,100])
             ax.set_xlabel('x', fontsize = 14)
-            ax.set_ylim([-50,50])
+            ax.set_ylim([-100,100])
             ax.set_ylabel('y', fontsize = 14)
             ax.set_box_aspect(1)
             ax.set_title('Final Output')
@@ -823,36 +842,6 @@ class CodeRingNetwork:
     #     score = curv_penalty * intersec_score * length_score
         # return score
     
-    # def code_spread_metric(self, code_activity, **metric_kwargs):
-    #     n = self.code_layer.num_code_units
-    #     if code_activity.shape == (n,1):
-    #         code_activity = code_activity.flatten()
-    #     num_high = np.count_nonzero(code_activity > metric_kwargs['min_activity_value'])
-    #     high_idxs = np.argwhere(code_activity > metric_kwargs['min_activity_value']).flatten()
-    #     spreads = np.zeros((n, n, 2)) + 9999
-    #     for i in high_idxs:
-    #         for j in high_idxs:
-    #             if num_high == np.count_nonzero(code_activity[i:j+1] > metric_kwargs['min_activity_value']):
-    #                 spreads[i][j][0] = np.abs(i - j) + 1
-    #             if num_high == np.count_nonzero(np.concatenate((code_activity[0:i+1], code_activity[j:n])) > metric_kwargs['min_activity_value']):
-    #                 spreads[i][j][1] = n - np.abs(i - j) + 1
-    #     min_spread = np.min(spreads)
-    #     top = exponential(min_spread, rate=metric_kwargs['spread_penalty_rate'], center=num_high, init_val=1)
-    #     bottom = 1 + (metric_kwargs['weight_diff_from_desired']  * np.abs(metric_kwargs['num_desired_high'] - num_high))
-    #     spread_score = top / bottom
-    #     return spread_score
-
-    # def kendall_rank_metric(self, code_activity, **metric_kwargs): 
-    #     # TODO: this still doesn't account for patterns that wrap around
-    #     n = self.code_layer.num_code_units
-    #     if code_activity.shape == (n,1):
-    #         code_activity = code_activity.flatten()
-    #     num_high = np.count_nonzero(code_activity > metric_kwargs['min_activity_value'])
-    #     high_idxs = np.argwhere(code_activity > metric_kwargs['min_activity_value']).flatten()
-    #     ideal = np.arange(1, num_high + 1) # values don't matter, just the order
-    #     kendall = np.abs(kendalltau(code_activity[high_idxs], ideal).statistic)
-    #     return kendall
-    
     def eval_code_activity(self, code_activity, **metric_kwargs):
         n = self.code_layer.num_code_units
         if code_activity.shape == (n,1):
@@ -946,91 +935,89 @@ if __name__ == '__main__':
     # pretrain_map_sigma = 2
 
     # define training arguments
-    train_epochs = 900
+    train_epochs = 1000
     train_init_lr = 0.1
     train_lr_decay = -0.001
     train_init_map_sigma = 2
-    train_nhood_decay = -0.002
+    train_nhood_decay = -0.0015
     train_init_delta = 1.0
-    delta_exp_decay_rate = -0.0025
+    delta_exp_decay_rate = -0.002
 
-    # define metric-specific arguments
-    max_curv = 1
-    # max_curv_init = 2
-    # max_curv_decay = -0.002
-    curv_filter_sigma = 2
-    curv_penalty_rate = -0.25
-    intersec_penalty_rate = -1.5
-    doodle_len_beta = 3
-    min_doodle_len = 50
-    metric_init_mu = 0.9
-    metric_mu_decay = -0.0005
-    score_mu = metric_init_mu
-    metric_init_beta = 50
-    metric_beta_decay = -0.003
-    score_beta = metric_init_beta
+    # # define metric-specific arguments
+    # max_curv = 1
+    # # max_curv_init = 2
+    # # max_curv_decay = -0.002
+    # curv_filter_sigma = 2
+    # curv_penalty_rate = -0.25
+    # intersec_penalty_rate = -1.5
+    # doodle_len_beta = 3
+    # min_doodle_len = 50
+    # metric_init_mu = 0.9
+    # metric_mu_decay = -0.0005
+    # score_mu = metric_init_mu
+    # metric_init_beta = 50
+    # metric_beta_decay = -0.003
+    # score_beta = metric_init_beta
 
     min_activity_value = 0.05
-    spread_penalty_rate = -0.05
+    spread_penalty_rate = -0.8
     weight_diff_from_desired = 0.2
-    num_desired_high = 8
+    num_desired_high = 9
+    theta = 0.35
+
+    crn = CodeRingNetwork(num_ring_units=ring_neurons,
+                        num_code_units=code_neurons,
+                        code_factor=code_factor,
+                        num_dur_units=duration_neurons,
+                        map_d1=map_neurons_d1, map_d2=map_neurons_d2,
+                        code_ring_spread=weight_RC_spread,
+                        noise_rate=8, noise_num_high=num_desired_high)
     
-    for theta in [0.25, 0.5, 0.75]:
-        crn = CodeRingNetwork(num_ring_units=ring_neurons,
-                            num_code_units=code_neurons,
-                            code_factor=code_factor,
-                            num_dur_units=duration_neurons,
-                            map_d1=map_neurons_d1, map_d2=map_neurons_d2,
-                            code_ring_spread=weight_RC_spread,
-                            noise_rate=6, noise_num_high=8)
-        
-        crn.id_string = crn.id_string + f'_theta{theta}'.replace('.','p')
-        
-        train_scores = crn.train(train_epochs, map_activity_sigma, train_init_delta, delta_exp_decay_rate,
-                        train_init_map_sigma, train_nhood_decay,
-                        train_init_lr, train_lr_decay,
-                        durs, tmax, tsteps, plot_gif=False, plot_results=False,
-                        min_activity_value=min_activity_value,
-                        spread_penalty_rate=spread_penalty_rate,
-                        weight_diff_from_desired=weight_diff_from_desired,
-                        theta=theta,
-                        num_desired_high=num_desired_high)
-                        # curv_penalty_rate=curv_penalty_rate, 
-                        # intersec_penalty_rate=intersec_penalty_rate, 
-                        # doodle_len_beta=doodle_len_beta, 
-                        # min_doodle_len=min_doodle_len,
-                        # max_curv=max_curv,
-                        # curv_filter_sigma=curv_filter_sigma
-                        # max_curv_init=2, max_curv_decay=-0.002
-                        # )
+    train_scores = crn.train(train_epochs, map_activity_sigma, train_init_delta, delta_exp_decay_rate,
+                    train_init_map_sigma, train_nhood_decay,
+                    train_init_lr, train_lr_decay,
+                    durs, tmax, tsteps, plot_gif=False, plot_results=False,
+                    min_activity_value=min_activity_value,
+                    spread_penalty_rate=spread_penalty_rate,
+                    weight_diff_from_desired=weight_diff_from_desired,
+                    theta=theta,
+                    num_desired_high=num_desired_high)
+                    # curv_penalty_rate=curv_penalty_rate, 
+                    # intersec_penalty_rate=intersec_penalty_rate, 
+                    # doodle_len_beta=doodle_len_beta, 
+                    # min_doodle_len=min_doodle_len,
+                    # max_curv=max_curv,
+                    # curv_filter_sigma=curv_filter_sigma
+                    # max_curv_init=2, max_curv_decay=-0.002
+                    # )
 
-        # plot score heatmap
-        plt.matshow(train_scores.T, vmin=0, vmax=1)
-        plt.colorbar()
-        plt.title(f'Scores Heatmap {crn.id_string}')
-        plt.xlabel('Activated Map Neuron')
-        plt.ylabel('Epoch')
-        plt.savefig(f'{crn.folder_name}\\scores_heatmap_{crn.id_string}.png')
-        plt.close()
-        
-        # plot results timeseries
-        # plot score timeseries for each neuron
-        plt.plot(train_scores)
-        epoch_scores = np.mean(train_scores, axis=1)
-        plt.plot(epoch_scores, label='Avg. Epoch Scores', linewidth=4, c='black')
-        plt.title(f'Neuron Scores Over Time {crn.id_string}')
-        plt.savefig(f'{crn.folder_name}\\scores_neurons_{crn.id_string}.png')
-        plt.close()
+    # plot score heatmap
+    plt.matshow(train_scores.T, vmin=0, vmax=1)
+    plt.colorbar()
+    plt.title(f'Scores Heatmap {crn.id_string}')
+    plt.xlabel('Activated Map Neuron')
+    plt.ylabel('Epoch')
+    plt.savefig(f'{crn.folder_name}\\scores_heatmap_{crn.id_string}.png')
+    plt.close()
+    
+    # plot results timeseries
+    # plot score timeseries for each neuron
+    plt.plot(train_scores)
+    epoch_scores = np.mean(train_scores, axis=1)
+    plt.plot(epoch_scores, label='Avg. Epoch Scores', linewidth=4, c='black')
+    plt.title(f'Neuron Scores Over Time {crn.id_string}')
+    plt.savefig(f'{crn.folder_name}\\scores_neurons_{crn.id_string}.png')
+    plt.close()
 
-        for idx in range(map_neurons_d1*map_neurons_d2):
-            plt.scatter(range(train_epochs), train_scores[:,idx])
-        plt.plot(epoch_scores, label='Avg. Epoch Score', c='black')
-        plt.title(f'Scores Over Time {crn.id_string}')
-        plt.legend()
-        plt.savefig(f'{crn.folder_name}\\scores_all_{crn.id_string}.png')
-        plt.close()
+    for idx in range(map_neurons_d1*map_neurons_d2):
+        plt.scatter(range(train_epochs), train_scores[:,idx])
+    plt.plot(epoch_scores, label='Avg. Epoch Score', c='black')
+    plt.title(f'Scores Over Time {crn.id_string}')
+    plt.legend()
+    plt.savefig(f'{crn.folder_name}\\scores_all_{crn.id_string}.png')
+    plt.close()
 
-        write_params(f'{crn.folder_name}\\params_{crn.id_string}.txt', **locals())
-        crn.save_model_params(crn.map_layer.weights_to_code_from_map, f'{crn.folder_name}\\weights_{crn.id_string}.xlsx')
+    write_params(f'{crn.folder_name}\\params_{crn.id_string}.txt', **locals())
+    crn.save_model_params(crn.map_layer.weights_to_code_from_map, f'{crn.folder_name}\\weights_{crn.id_string}.xlsx')
 
     pass

@@ -144,7 +144,7 @@ class MapLayer():
 
         :returns: None
         '''
-        nhood_scores = self.neighborhood(winner, sigma=nhood_sigma).reshape(self.d1*self.d2, 1) - 0.02 # antihebbian learning
+        nhood_scores = self.neighborhood(winner, sigma=nhood_sigma).reshape(self.d1*self.d2, 1) #- 0.02 # antihebbian learning
 
         effective_lr = learning_rate * score
         weight_changes = (nhood_scores * effective_lr *
