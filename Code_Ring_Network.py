@@ -133,7 +133,7 @@ class CodeRingNetwork:
 
             # evaluate drawing
             # score, curvatures, intersec_pts, intersec_times = self.evaluate(x_series, y_series, t_steps, **metric_kwargs)
-            score = self.eval_code_activity(code_output, **metric_kwargs)
+            score = self.clockwise_mono_spread_metric(code_output, **metric_kwargs)
             intersec_pts = np.ndarray((0,2))
             intersec_times = np.array([])
 
@@ -268,9 +268,9 @@ class CodeRingNetwork:
                 # code_output = np.zeros((self.code_layer.num_code_units, 1))
                 # code_output[top_idxs] = code_input[top_idxs]
 
-                ideal = np.concatenate((np.linspace(1.0, 0.1, metric_kwargs['num_desired_high']), np.zeros(self.code_layer.num_code_units-metric_kwargs['num_desired_high'])))
+                ideal = np.concatenate((np.linspace(0.1, 1.0, metric_kwargs['num_desired_high']), np.zeros(self.code_layer.num_code_units-metric_kwargs['num_desired_high'])))
                 random_roll = np.random.randint(0, self.code_layer.num_code_units)
-                flip_vector = np.random.randint(0,2)
+                flip_vector = 0 # np.random.randint(0,2)
 
                 if flip_vector:
                     code_input = np.flip(np.roll(ideal, random_roll))
@@ -298,7 +298,7 @@ class CodeRingNetwork:
 
                 # evaluate drawing
                 # score, curvatures, intersec_pts, intersec_times = self.evaluate(x_series, y_series, t_steps=t_steps, **metric_kwargs)
-                score = self.eval_code_activity(code_output, **metric_kwargs)
+                score = self.clockwise_mono_spread_metric(code_output, **metric_kwargs)
                 intersec_pts = np.ndarray((0,2))
                 intersec_times = np.array([])
 
@@ -441,7 +441,7 @@ class CodeRingNetwork:
 
             # evaluate drawing
             # score, curvatures, intersec_pts, intersec_times = self.evaluate(x_series, y_series, t_steps=t_steps, **metric_kwargs)
-            score = self.eval_code_activity(code_output, **metric_kwargs)
+            score = self.clockwise_mono_spread_metric(code_output, **metric_kwargs)
             intersec_pts = np.ndarray((0,2))
             intersec_times = np.array([])
 
@@ -909,6 +909,58 @@ class CodeRingNetwork:
         max_score = scores[i][j][dir]
 
         return max_score
+    
+    def clockwise_mono_spread_metric(self, code_activity, **metric_kwargs):
+        n = len(code_activity)
+        if code_activity.shape == (n,1):
+            code_activity = code_activity.flatten()
+        num_high = np.count_nonzero(code_activity > metric_kwargs['min_activity_value'])
+        high_idxs = np.argwhere(code_activity > metric_kwargs['min_activity_value']).flatten()
+        ideal = np.arange(num_high, 0, -1) # values don't matter, just the order
+
+        # store all scores for each i,j pair, where each pair has a chain forward
+        scores = np.zeros((n, n))
+
+        # iterate over left endpoint of chain
+        for i in high_idxs:
+            # iterate over right endpoints of chain
+            for j in high_idxs:
+                # print(i,j)
+                if i > j:
+                    spread = n - i + j + 1
+                    # get all indexes i to n-1, then 0 to j, going fwd
+                    fwd_idxs_all = np.concatenate((np.arange(i, n), np.arange(0, j+1)))
+                else:
+                    spread = j - i + 1
+                    # get all indexes i to j going fwd
+                    fwd_idxs_all = np.arange(i, j + 1)
+                # get the indexes of those indexes (therefore, temp indexes) that have a high value
+                fwd_high_idxs_temp = np.argwhere(code_activity[fwd_idxs_all] > metric_kwargs['min_activity_value']).flatten()
+                # and go back to getting the original index value from those temp indexes
+                fwd_high_idxs = fwd_idxs_all[fwd_high_idxs_temp]
+
+                # check that our list of high indexes going forward contains all high values. if not, we skip this chain
+                if num_high == len(fwd_high_idxs):
+                    # spread score based on distance going forward
+                    dist_from_perf_spread = np.abs(spread - num_high)
+                    # print('dist_from_perf_spread: ', dist_from_perf_spread)
+                    top = exponential(dist_from_perf_spread, rate=metric_kwargs['spread_penalty_rate'], init_val=1)
+                    bottom = 1 + (metric_kwargs['weight_diff_from_desired']  * np.abs(metric_kwargs['num_desired_high'] - num_high))
+                    spread_score = top / bottom
+                    # print('spread_score: ', spread_score)
+
+                    # kendall score based on chain going forward - since clockwise only, need to normalize kendall to [0,1]
+                    kendall = (kendalltau(code_activity[fwd_high_idxs], ideal).statistic + 1) / 2
+                    # print('kendall: ', kendall)
+
+                    # weighted average of the two scores
+                    scores[i][j] = (metric_kwargs['theta'] * spread_score) + ((1 - metric_kwargs['theta']) * kendall)
+        
+        i, j = np.unravel_index(np.argmax(scores), shape=(n,n))
+        max_score = scores[i][j]
+
+        return max_score
+
         
 if __name__ == '__main__':
     ring_neurons = 36
