@@ -20,8 +20,7 @@ from utilities import get_color_range, bimodal_exponential_noise, exponential, s
 
 class CodeRingNetwork:
     def __init__(self, num_ring_units: int, num_code_units: int, code_factor: int, num_dur_units: int,
-                 map_d1: int, map_d2: int, code_ring_spread: float = 0.02,
-                 noise_rate: float = 8, noise_num_high: int = 8) -> None:
+                 map_d1: int, map_d2: int, **init_kwargs) -> None:
         '''
         The class for the Code Ring Network. The architecture is as follows:
             - Map Layer: A Self-Organizing Feature Map (SOFM) for encoding sequences
@@ -59,17 +58,17 @@ class CodeRingNetwork:
         self.vars_to_plot = {'z': True, 'v': False, 'u': False, 'I_prime': False}
         self.COLOR_RANGE = get_color_range(num_ring_units, map_name='hsv')
 
-        self.noise_rate = noise_rate
-        self.noise_num_high = noise_num_high
+        self.noise_rate_low = init_kwargs['noise_rate_low']
+        self.noise_num_high = init_kwargs['noise_num_high']
 
         # layer initalizations
         self.ring_layer = RingLayer(num_ring_units, phi=1.2, beta=200)
         self.code_layer = CodeLayer(num_map_units=(map_d1*map_d2), num_ring_units=num_ring_units,
                                     num_code_units=num_code_units, code_factor=code_factor,
-                                    code_ring_spread=code_ring_spread)
+                                    code_ring_spread=init_kwargs['code_ring_spread'])
         self.duration_layer = DurationLayer(num_dur_units, (map_d1*map_d2))
         self.map_layer = MapLayer(map_d1, map_d2, num_ring_units, num_code_units, 
-                                  noise_rate=noise_rate, noise_num_high=noise_num_high)
+                                  **init_kwargs)
                
     def pretrain(self, num_epochs: int, learning_sigma: float, learning_rate: float,
                  durations: float, t_max: int, t_steps: int,
@@ -108,9 +107,12 @@ class CodeRingNetwork:
         plt.close()
 
         for iteration in tqdm(range(num_epochs)):
-            code_input = bimodal_exponential_noise(num_low=(self.ring_layer.num_ring_units-self.noise_num_high),
-                                                   num_high=self.noise_num_high,
-                                                   noise_rate=self.noise_rate)
+            code_input = bimodal_exponential_noise(num_low=self.ring_layer.num_ring_units-num_desired_high, 
+                                                num_high=num_desired_high, 
+                                                noise_rate_low=noise_rate_low,
+                                                noise_rate_high=noise_rate_high,
+                                                shuffle=False,
+                                                clip_01=True)
 
             # do we want to min-max scale the noise? previously had no normalization for the good results
             code_output = (code_input) # - min(code_input)) / (np.max(code_input) - np.min(code_input)) # TODO: do we want to min-max scale this?
@@ -513,7 +515,6 @@ class CodeRingNetwork:
 
         :returns: None
         '''
-        # self.id_string = folder_name.split('\\')[-1]
         f, axs = plt.subplots(1, 2)
         self.plot_final_doodle(axs[0], xs, ys, intersec_pts)
         self.plot_activity(axs[1], ring_inputs, v, u, z, I_prime)
@@ -964,7 +965,7 @@ class CodeRingNetwork:
         
 if __name__ == '__main__':
     ring_neurons = 36
-    weight_RC_spread = 0.02
+    weight_RC_spread = 0.00002
 
     code_factor = 1
     code_neurons = code_factor*ring_neurons
@@ -1011,6 +1012,11 @@ if __name__ == '__main__':
     # metric_beta_decay = -0.003
     # score_beta = metric_init_beta
 
+    noise_rate_low = 12
+    noise_rate_high = 6
+    noise_num_low = int(ring_neurons * 3 // 4)
+    noise_num_high = int(ring_neurons * 1 // 4)
+
     min_activity_value = 0.05
     spread_penalty_rate = -0.8
     weight_diff_from_desired = 0.2
@@ -1023,7 +1029,8 @@ if __name__ == '__main__':
                         num_dur_units=duration_neurons,
                         map_d1=map_neurons_d1, map_d2=map_neurons_d2,
                         code_ring_spread=weight_RC_spread,
-                        noise_rate=8, noise_num_high=num_desired_high)
+                        noise_rate_low=noise_rate_low, noise_rate_high=noise_rate_high,
+                        noise_num_low=noise_num_low, noise_num_high=noise_num_high)
     
     train_scores = crn.train(train_epochs, map_activity_sigma, train_init_delta, delta_exp_decay_rate,
                     train_init_map_sigma, train_nhood_decay,
@@ -1033,7 +1040,7 @@ if __name__ == '__main__':
                     spread_penalty_rate=spread_penalty_rate,
                     weight_diff_from_desired=weight_diff_from_desired,
                     theta=theta,
-                    num_desired_high=num_desired_high)
+                    noise_num_low=noise_num_low, noise_num_high=noise_num_high)
                     # curv_penalty_rate=curv_penalty_rate, 
                     # intersec_penalty_rate=intersec_penalty_rate, 
                     # doodle_len_beta=doodle_len_beta, 

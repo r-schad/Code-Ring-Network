@@ -51,17 +51,19 @@ def exponential(t: (float, np.ndarray), rate: float, init_val: float, center: fl
     output = init_val * np.exp(rate * (t - center))
     return output
 
-def bimodal_exponential_noise(num_low, num_high, noise_rate):
+def bimodal_exponential_noise(num_low, num_high, noise_rate_low, noise_rate_high, shuffle=True, clip_01=True):
     '''
     Returns a shuffled vector of noise values clipped to [0,1]. Returned vector is in the shape (num_low + num_high, 1).
     '''
-    noise1 = np.random.exponential(1 / noise_rate, num_low)
-    noise2 = 1 - np.random.exponential(1 / noise_rate, num_high)
+    noise1 = np.random.exponential(1 / noise_rate_low, num_low)
+    noise2 = 1 - np.random.exponential(1 / noise_rate_high, num_high)
     noise = np.concatenate((noise1, noise2))
-    np.random.shuffle(noise)
+    if shuffle:
+        np.random.shuffle(noise)
+    if clip_01:
+        noise = np.clip(noise, 0, 1)
 
-    clipped_noise = np.clip(noise, 0, 1)
-    return clipped_noise
+    return noise
 
 def area_of_triangle(x1: float, y1: float, x2: float, y2: float, x3: float, y3: float) -> float:
     '''
