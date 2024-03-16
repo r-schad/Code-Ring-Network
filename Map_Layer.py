@@ -37,12 +37,15 @@ class MapLayer():
         self.weights_to_code_from_map = np.ndarray((num_code_units, int(map_d1*map_d2)))
         # initialize weights with exponential distribution (same as noise generating process)
         for m in range(int(map_d1*map_d2)):
-            self.weights_to_code_from_map[:,m] = bimodal_exponential_noise(num_low=init_kwargs['noise_num_low'], 
+            noise = bimodal_exponential_noise(num_low=init_kwargs['noise_num_low'], 
                                                                             num_high=init_kwargs['noise_num_high'], 
                                                                             noise_rate_low=init_kwargs['noise_rate_low'],
                                                                             noise_rate_high=init_kwargs['noise_rate_high'],
                                                                             shuffle=False,
                                                                             clip_01=True)
+        
+            roll_val = np.random.randint(0, self.num_ring_units)
+            self.weights_to_code_from_map[:,m] = np.roll(noise, roll_val)
         # defines a `view` of original array - they point to same memory - between W_CM and W_MC
         self.weights_to_map_from_code = self.weights_to_code_from_map.T
 

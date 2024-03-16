@@ -10,7 +10,7 @@ import os
 from datetime import datetime as dt
 import pandas as pd
 import openpyxl
-from scipy.stats import kendalltau
+from scipy.stats import kendalltau, weightedtau
 
 from Ring_Layer import RingLayer
 from Code_Layer import CodeLayer
@@ -135,7 +135,7 @@ class CodeRingNetwork:
 
             # evaluate drawing
             # score, curvatures, intersec_pts, intersec_times = self.evaluate(x_series, y_series, t_steps, **metric_kwargs)
-            score = self.clockwise_mono_spread_metric(code_output, **metric_kwargs)
+            score = self.nominal_ang_dev_metric(code_output, **metric_kwargs)
             intersec_pts = np.ndarray((0,2))
             intersec_times = np.array([])
 
@@ -240,18 +240,34 @@ class CodeRingNetwork:
             for iteration, rand_active_idx in enumerate(tqdm(map_neuron_idxs)):
                 rand_active_neuron = self.map_layer.convert_to_coord(rand_active_idx)
 
-                # # apply static neighborhood range for activation neighborhood
-                # # to activate the neighborhood around the winner
-                # map_signal = self.map_layer.neighborhood(rand_active_neuron, sigma=activation_nhood)
+                # apply static neighborhood range for activation neighborhood
+                # to activate the neighborhood around the winner
+                map_signal = self.map_layer.neighborhood(rand_active_neuron, sigma=activation_nhood)
                 
-                # # propagate map signal forward
-                # map_activation = self.map_layer.weights_to_code_from_map @ map_signal.reshape(map_size, 1)
+                # propagate map signal forward
+                map_activation = self.map_layer.weights_to_code_from_map @ map_signal.reshape(map_size, 1)
 
-                # code_noise = bimodal_exponential_noise(num_low=(self.code_layer.num_code_units-self.noise_num_high),
-                #                                    num_high=self.noise_num_high,
-                #                                    noise_rate=self.noise_rate).reshape(self.code_layer.num_code_units, 1)
+                code_noise = bimodal_exponential_noise(num_low=metric_kwargs['noise_num_low'],
+                                                       num_high=metric_kwargs['noise_num_high'],
+                                                       noise_rate_low=metric_kwargs['noise_rate_low'],
+                                                       noise_rate_high=metric_kwargs['noise_rate_high'],
+                                                       shuffle=False,
+                                                       clip_01=True).reshape(self.code_layer.num_code_units, 1)
+                
+                # ideal = np.concatenate((np.linspace(0.25, 1.0, metric_kwargs['noise_num_high']), np.zeros(metric_kwargs['noise_num_low'])))
+                random_roll = np.random.randint(0, self.code_layer.num_code_units)
+                # flip_vector = 1 # np.random.randint(0,2)
 
-                # ## noise vs map influence calculation ###
+                # if flip_vector:
+                #     code_noise = np.flip(np.roll(code_noise, random_roll))
+                # else:
+                #     
+                code_noise = np.roll(code_noise, random_roll)
+
+                ## map additive influence ## 
+                code_input = (delta * code_noise) + ((1 - delta) * map_activation)
+
+                ## noise vs map influence calculation ###
                 # # get the number of values in vector that will come from noise
                 # num_noise = int(np.round(self.code_layer.num_code_units * delta, 0))
                 # # get random indexes to be noise
@@ -266,22 +282,8 @@ class CodeRingNetwork:
                 # # fill in the map influence indexes in code activity
                 # code_input[map_activity_idxs] = map_activation[map_activity_idxs]
 
-                # top_idxs = np.argsort(code_input.flatten())[-metric_kwargs['num_desired_high']:]
-                # code_output = np.zeros((self.code_layer.num_code_units, 1))
-                # code_output[top_idxs] = code_input[top_idxs]
-
-                ideal = np.concatenate((np.linspace(0.1, 1.0, metric_kwargs['num_desired_high']), np.zeros(self.code_layer.num_code_units-metric_kwargs['num_desired_high'])))
-                random_roll = np.random.randint(0, self.code_layer.num_code_units)
-                flip_vector = 0 # np.random.randint(0,2)
-
-                if flip_vector:
-                    code_input = np.flip(np.roll(ideal, random_roll))
-                else:
-                    code_input = np.roll(ideal, random_roll)
-
-
-                code_output = np.where(code_input >= metric_kwargs['min_activity_value'], code_input, 0.0) # (code_input - min(code_input)) / (np.max(code_input) - np.min(code_input)) # TODO: do we want to min-max scale this? previously had no normalization for the good results
-                
+                code_output = np.where(code_input > metric_kwargs['min_activity_value'], code_input, 0.0)
+               
                 # determine output of code layer (input into ring layer)
                 ring_input = (self.code_layer.weights_to_ring_from_code @ code_output).squeeze()
 
@@ -300,7 +302,7 @@ class CodeRingNetwork:
 
                 # evaluate drawing
                 # score, curvatures, intersec_pts, intersec_times = self.evaluate(x_series, y_series, t_steps=t_steps, **metric_kwargs)
-                score = self.clockwise_mono_spread_metric(code_output, **metric_kwargs)
+                _, score = self.weighted_kendall(code_output, **metric_kwargs)
                 intersec_pts = np.ndarray((0,2))
                 intersec_times = np.array([])
 
@@ -348,6 +350,10 @@ class CodeRingNetwork:
 
             # decrease the max allowed curvature
             # metric_kwargs['max_curv'] = exponential(epoch, rate=metric_kwargs['max_curv_decay'], init_val=metric_kwargs['max_curv_init'])
+
+            # make metric stricter
+            metric_kwargs['score_beta'] = exponential(epoch, rate=metric_kwargs['metric_beta_decay'], init_val=metric_kwargs['metric_init_beta'])
+            metric_kwargs['score_mu'] = exponential(epoch, rate=metric_kwargs['metric_mu_decay'], init_val=metric_kwargs['metric_init_mu'])
  
             # plot results every 100 epochs
             if not(epoch % 100):
@@ -443,7 +449,7 @@ class CodeRingNetwork:
 
             # evaluate drawing
             # score, curvatures, intersec_pts, intersec_times = self.evaluate(x_series, y_series, t_steps=t_steps, **metric_kwargs)
-            score = self.clockwise_mono_spread_metric(code_output, **metric_kwargs)
+            _, score = self.weighted_kendall(code_output, **metric_kwargs)
             intersec_pts = np.ndarray((0,2))
             intersec_times = np.array([])
 
@@ -789,6 +795,7 @@ class CodeRingNetwork:
         doodle_len = np.sum(dists)
         return doodle_len
     
+    """
     # def evaluate(self, x_series: np.ndarray, y_series: np.ndarray, t_steps: int, **metric_kwargs) -> tuple[float, np.array, np.ndarray, np.array]:
     #     '''
     #     Gets the intersection points, curvature values, and total metric score of a doodle,
@@ -843,126 +850,171 @@ class CodeRingNetwork:
     #     score = curv_penalty * intersec_score * length_score
         # return score
     
-    def eval_code_activity(self, code_activity, **metric_kwargs):
-        n = self.code_layer.num_code_units
-        if code_activity.shape == (n,1):
-            code_activity = code_activity.flatten()
-        num_high = np.count_nonzero(code_activity > metric_kwargs['min_activity_value'])
-        high_idxs = np.argwhere(code_activity > metric_kwargs['min_activity_value']).flatten()
-        ideal = np.arange(1, num_high + 1) # values don't matter, just the order
+    # def eval_code_activity(self, code_activity, **metric_kwargs):
+    #     n = self.code_layer.num_code_units
+    #     if code_activity.shape == (n,1):
+    #         code_activity = code_activity.flatten()
+    #     num_high = np.count_nonzero(code_activity > metric_kwargs['min_activity_value'])
+    #     high_idxs = np.argwhere(code_activity > metric_kwargs['min_activity_value']).flatten()
+    #     ideal = np.arange(1, num_high + 1) # values don't matter, just the order
 
-        # store all scores for each i,j pair, where each pair has a chain either forward or backward
-        scores = np.zeros((n, n, 2))
+    #     # store all scores for each i,j pair, where each pair has a chain either forward or backward
+    #     scores = np.zeros((n, n, 2))
 
-        # iterate over left endpoint of chain
-        for idx_of_idxs, i in enumerate(high_idxs):
-            # iterate over right endpoints of chain
-            for j in high_idxs[idx_of_idxs+1:]:
-                # print(i,j)
-                # get all indexes i to j going fwd
-                fwd_idxs_all = np.arange(i, j + 1)
-                # get the indexes of those indexes (therefore, temp indexes) that have a high value
-                fwd_high_idxs_temp = np.argwhere(code_activity[fwd_idxs_all] > metric_kwargs['min_activity_value']).flatten()
-                # and go back to getting the original index value from those temp indexes
-                fwd_high_idxs = fwd_idxs_all[fwd_high_idxs_temp]
+    #     # iterate over left endpoint of chain
+    #     for idx_of_idxs, i in enumerate(high_idxs):
+    #         # iterate over right endpoints of chain
+    #         for j in high_idxs[idx_of_idxs+1:]:
+    #             # print(i,j)
+    #             # get all indexes i to j going fwd
+    #             fwd_idxs_all = np.arange(i, j + 1)
+    #             # get the indexes of those indexes (therefore, temp indexes) that have a high value
+    #             fwd_high_idxs_temp = np.argwhere(code_activity[fwd_idxs_all] > metric_kwargs['min_activity_value']).flatten()
+    #             # and go back to getting the original index value from those temp indexes
+    #             fwd_high_idxs = fwd_idxs_all[fwd_high_idxs_temp]
 
-                # get all indexes from i to j going bkwd
-                bkwd_idxs_all = np.concatenate((np.arange(i,-1,-1), np.arange(n-1,j-1,-1)))
-                # get the indexes of those indexes (therefore, temp indexes) that have a high value        
-                bkwd_high_idxs_temp = np.argwhere(code_activity[bkwd_idxs_all] > metric_kwargs['min_activity_value']).flatten()
-                # and go back to getting the original index value from those temp indexes
-                bkwd_high_idxs = bkwd_idxs_all[bkwd_high_idxs_temp]
+    #             # get all indexes from i to j going bkwd
+    #             bkwd_idxs_all = np.concatenate((np.arange(i,-1,-1), np.arange(n-1,j-1,-1)))
+    #             # get the indexes of those indexes (therefore, temp indexes) that have a high value        
+    #             bkwd_high_idxs_temp = np.argwhere(code_activity[bkwd_idxs_all] > metric_kwargs['min_activity_value']).flatten()
+    #             # and go back to getting the original index value from those temp indexes
+    #             bkwd_high_idxs = bkwd_idxs_all[bkwd_high_idxs_temp]
 
-                # check that our list of high indexes going forward contains all high values. if not, we skip this chain
-                if num_high == len(fwd_high_idxs):
-                    # spread score based on distance going forward
-                    spread = np.abs(i - j) + 1
-                    dist_from_perf_spread = np.abs(spread - num_high)
-                    # print('dist_from_perf_spread: ', dist_from_perf_spread)
-                    top = exponential(dist_from_perf_spread, rate=metric_kwargs['spread_penalty_rate'], init_val=1)
-                    bottom = 1 + (metric_kwargs['weight_diff_from_desired']  * np.abs(metric_kwargs['num_desired_high'] - num_high))
-                    spread_score = top / bottom
+    #             # check that our list of high indexes going forward contains all high values. if not, we skip this chain
+    #             if num_high == len(fwd_high_idxs):
+    #                 # spread score based on distance going forward
+    #                 spread = np.abs(i - j) + 1
+    #                 dist_from_perf_spread = np.abs(spread - num_high)
+    #                 # print('dist_from_perf_spread: ', dist_from_perf_spread)
+    #                 top = exponential(dist_from_perf_spread, rate=metric_kwargs['spread_penalty_rate'], init_val=1)
+    #                 bottom = 1 + (metric_kwargs['weight_diff_from_desired']  * np.abs(metric_kwargs['num_desired_high'] - num_high))
+    #                 spread_score = top / bottom
 
-                    # kendall score based on chain going forward
-                    kendall = np.abs(kendalltau(code_activity[fwd_high_idxs], ideal).statistic)
-                    # print('kendall: ', kendall)
+    #                 # kendall score based on chain going forward
+    #                 kendall = np.abs(kendalltau(code_activity[fwd_high_idxs], ideal).statistic)
+    #                 # print('kendall: ', kendall)
 
-                    # weighted average of the two scores
-                    scores[i][j][0] = (metric_kwargs['theta'] * spread_score) + ((1 - metric_kwargs['theta']) * kendall)
+    #                 # weighted average of the two scores
+    #                 scores[i][j][0] = (metric_kwargs['theta'] * spread_score) + ((1 - metric_kwargs['theta']) * kendall)
                     
-                if num_high == len(bkwd_high_idxs): # TODO: elif?
-                    # spread score based on distance going forward
-                    spread = n - np.abs(i - j) + 1
-                    dist_from_perf_spread = np.abs(spread - num_high)
-                    # print('dist_from_perf_spread: ', dist_from_perf_spread)
-                    top = exponential(dist_from_perf_spread, rate=metric_kwargs['spread_penalty_rate'], init_val=1)
-                    bottom = 1 + (metric_kwargs['weight_diff_from_desired']  * np.abs(metric_kwargs['num_desired_high'] - num_high))
-                    spread_score = top / bottom
+    #             if num_high == len(bkwd_high_idxs): # TODO: elif?
+    #                 # spread score based on distance going forward
+    #                 spread = n - np.abs(i - j) + 1
+    #                 dist_from_perf_spread = np.abs(spread - num_high)
+    #                 # print('dist_from_perf_spread: ', dist_from_perf_spread)
+    #                 top = exponential(dist_from_perf_spread, rate=metric_kwargs['spread_penalty_rate'], init_val=1)
+    #                 bottom = 1 + (metric_kwargs['weight_diff_from_desired']  * np.abs(metric_kwargs['num_desired_high'] - num_high))
+    #                 spread_score = top / bottom
 
-                    # kendall score based on chain going forward
-                    kendall = np.abs(kendalltau(code_activity[bkwd_high_idxs], ideal).statistic)
-                    # print('kendall: ', kendall)
+    #                 # kendall score based on chain going forward
+    #                 kendall = np.abs(kendalltau(code_activity[bkwd_high_idxs], ideal).statistic)
+    #                 # print('kendall: ', kendall)
 
-                    # weighted average of the two scores
-                    scores[i][j][1] = (metric_kwargs['theta'] * spread_score) + ((1 - metric_kwargs['theta']) * kendall)
+    #                 # weighted average of the two scores
+    #                 scores[i][j][1] = (metric_kwargs['theta'] * spread_score) + ((1 - metric_kwargs['theta']) * kendall)
         
-        i, j, dir = np.unravel_index(np.argmax(scores), shape=(n,n,2))
-        max_score = scores[i][j][dir]
+    #     i, j, dir = np.unravel_index(np.argmax(scores), shape=(n,n,2))
+    #     max_score = scores[i][j][dir]
 
-        return max_score
+    #     return max_score
     
-    def clockwise_mono_spread_metric(self, code_activity, **metric_kwargs):
+    # def clockwise_mono_spread_metric(self, code_activity, **metric_kwargs):
+    #     n = len(code_activity)
+    #     if code_activity.shape == (n,1):
+    #         code_activity = code_activity.flatten()
+    #     num_high = np.count_nonzero(code_activity > metric_kwargs['min_activity_value'])
+    #     high_idxs = np.argwhere(code_activity > metric_kwargs['min_activity_value']).flatten()
+    #     ideal = np.arange(num_high, 0, -1) # values don't matter, just the order
+
+    #     # store all scores for each i,j pair, where each pair has a chain forward
+    #     scores = np.zeros((n, n))
+
+    #     # iterate over left endpoint of chain
+    #     for i in high_idxs:
+    #         # iterate over right endpoints of chain
+    #         for j in high_idxs:
+    #             # print(i,j)
+    #             if i > j:
+    #                 spread = n - i + j + 1
+    #                 # get all indexes i to n-1, then 0 to j, going fwd
+    #                 fwd_idxs_all = np.concatenate((np.arange(i, n), np.arange(0, j+1)))
+    #             else:
+    #                 spread = j - i + 1
+    #                 # get all indexes i to j going fwd
+    #                 fwd_idxs_all = np.arange(i, j + 1)
+    #             # get the indexes of those indexes (therefore, temp indexes) that have a high value
+    #             fwd_high_idxs_temp = np.argwhere(code_activity[fwd_idxs_all] > metric_kwargs['min_activity_value']).flatten()
+    #             # and go back to getting the original index value from those temp indexes
+    #             fwd_high_idxs = fwd_idxs_all[fwd_high_idxs_temp]
+
+    #             # check that our list of high indexes going forward contains all high values. if not, we skip this chain
+    #             if num_high == len(fwd_high_idxs):
+    #                 # spread score based on distance going forward
+    #                 dist_from_perf_spread = np.abs(spread - num_high)
+    #                 # print('dist_from_perf_spread: ', dist_from_perf_spread)
+    #                 top = exponential(dist_from_perf_spread, rate=metric_kwargs['spread_penalty_rate'], init_val=1)
+    #                 bottom = 1 + (metric_kwargs['weight_diff_from_desired']  * np.abs(metric_kwargs['num_desired_high'] - num_high))
+    #                 spread_score = top / bottom
+    #                 # print('spread_score: ', spread_score)
+
+    #                 # kendall score based on chain going forward - since clockwise only, need to normalize kendall to [0,1]
+    #                 kendall = (kendalltau(code_activity[fwd_high_idxs], ideal).statistic + 1) / 2
+    #                 # print('kendall: ', kendall)
+
+    #                 # weighted average of the two scores
+    #                 scores[i][j] = (metric_kwargs['theta'] * spread_score) + ((1 - metric_kwargs['theta']) * kendall)
+        
+    #     i, j = np.unravel_index(np.argmax(scores), shape=(n,n))
+    #     max_score = scores[i][j]
+
+    #     return max_score
+
+    # def nominal_ang_dev_metric(self, code_activity, **metric_kwargs):
+    #     n = len(code_activity)
+    #     active_idxs = np.argwhere(code_activity > metric_kwargs['min_activity_value']).flatten()
+    #     num_high = len(active_idxs)
+    #     activity_order = np.flip(np.argsort(code_activity[active_idxs])) # decreasing order, because highest activity fires first
+    #     effector_order = active_idxs[activity_order].flatten()
+    #     delta_angle = 360 / n
+
+    #     init_effector = effector_order[0]
+    #     init_angle = init_effector * delta_angle
+
+    #     # check if active zone wraps around past 0 deg. if so, break up chain into 2 parts before combining
+    #     if init_angle + (num_high * delta_angle) > 350:
+    #         # get how many steps in 1st part of chain
+    #         steps_from_init_to_0 = (360 - init_angle) / delta_angle
+    #         # get how many steps in 2nd part of chain
+    #         steps_from_0_to_end = num_high - steps_from_init_to_0
+    #         # then combine the two parts
+    #         ideal_angles = np.concatenate((np.arange(init_angle, 360, step=delta_angle), 
+    #                                     np.arange(0, (steps_from_0_to_end * delta_angle), step=delta_angle)))
+    #     # else, active zone doesn't wrap around
+    #     else:
+    #         ideal_angles = np.arange(init_angle, (init_angle + (num_high * delta_angle)), step=delta_angle)
+
+    #     effector_angles = effector_order * delta_angle
+    #     devs = effector_angles - ideal_angles
+    #     dev_sum = np.sum(np.abs(devs))
+    #     # print(dev_sum)
+    #     score = exponential(dev_sum, rate=metric_kwargs['penalty_rate'], init_val=1)
+    #     return score
+    """
+
+    def weighted_kendall(self, code_activity, **metric_kwargs):
         n = len(code_activity)
-        if code_activity.shape == (n,1):
-            code_activity = code_activity.flatten()
-        num_high = np.count_nonzero(code_activity > metric_kwargs['min_activity_value'])
-        high_idxs = np.argwhere(code_activity > metric_kwargs['min_activity_value']).flatten()
-        ideal = np.arange(num_high, 0, -1) # values don't matter, just the order
-
-        # store all scores for each i,j pair, where each pair has a chain forward
-        scores = np.zeros((n, n))
-
-        # iterate over left endpoint of chain
-        for i in high_idxs:
-            # iterate over right endpoints of chain
-            for j in high_idxs:
-                # print(i,j)
-                if i > j:
-                    spread = n - i + j + 1
-                    # get all indexes i to n-1, then 0 to j, going fwd
-                    fwd_idxs_all = np.concatenate((np.arange(i, n), np.arange(0, j+1)))
-                else:
-                    spread = j - i + 1
-                    # get all indexes i to j going fwd
-                    fwd_idxs_all = np.arange(i, j + 1)
-                # get the indexes of those indexes (therefore, temp indexes) that have a high value
-                fwd_high_idxs_temp = np.argwhere(code_activity[fwd_idxs_all] > metric_kwargs['min_activity_value']).flatten()
-                # and go back to getting the original index value from those temp indexes
-                fwd_high_idxs = fwd_idxs_all[fwd_high_idxs_temp]
-
-                # check that our list of high indexes going forward contains all high values. if not, we skip this chain
-                if num_high == len(fwd_high_idxs):
-                    # spread score based on distance going forward
-                    dist_from_perf_spread = np.abs(spread - num_high)
-                    # print('dist_from_perf_spread: ', dist_from_perf_spread)
-                    top = exponential(dist_from_perf_spread, rate=metric_kwargs['spread_penalty_rate'], init_val=1)
-                    bottom = 1 + (metric_kwargs['weight_diff_from_desired']  * np.abs(metric_kwargs['num_desired_high'] - num_high))
-                    spread_score = top / bottom
-                    # print('spread_score: ', spread_score)
-
-                    # kendall score based on chain going forward - since clockwise only, need to normalize kendall to [0,1]
-                    kendall = (kendalltau(code_activity[fwd_high_idxs], ideal).statistic + 1) / 2
-                    # print('kendall: ', kendall)
-
-                    # weighted average of the two scores
-                    scores[i][j] = (metric_kwargs['theta'] * spread_score) + ((1 - metric_kwargs['theta']) * kendall)
+        ideal = np.arange(n, 0, -1)
+        high_idxs = np.argwhere(code_activity >= metric_kwargs['min_activity_value']).flatten()
+        weighted_taus = []
+        for i in range(n):
+            ideal_rolled = np.roll(ideal, i)
+            wtd_tau_normd = (weightedtau(code_activity, ideal_rolled, rank=False, weigher=lambda x: 1 if x in high_idxs else 0, additive=True).statistic + 1) / 2
+            weighted_taus += [wtd_tau_normd]
         
-        i, j = np.unravel_index(np.argmax(scores), shape=(n,n))
-        max_score = scores[i][j]
+        best_w_tau = np.max(weighted_taus)
+        score = sigmoid(best_w_tau, beta=metric_kwargs['score_beta'], mu=metric_kwargs['score_mu'])
+        return best_w_tau, score
 
-        return max_score
-
-        
 if __name__ == '__main__':
     ring_neurons = 36
     weight_RC_spread = 0.00002
@@ -1005,23 +1057,26 @@ if __name__ == '__main__':
     # intersec_penalty_rate = -1.5
     # doodle_len_beta = 3
     # min_doodle_len = 50
-    # metric_init_mu = 0.9
-    # metric_mu_decay = -0.0005
-    # score_mu = metric_init_mu
-    # metric_init_beta = 50
-    # metric_beta_decay = -0.003
-    # score_beta = metric_init_beta
+
+    metric_init_mu = 0.9
+    metric_mu_decay = 0.0 # TODO: try changing this
+    score_mu = metric_init_mu
+    metric_init_beta = 80
+    metric_beta_decay = 0.0
+    score_beta = metric_init_beta
 
     noise_rate_low = 12
     noise_rate_high = 6
     noise_num_low = int(ring_neurons * 3 // 4)
     noise_num_high = int(ring_neurons * 1 // 4)
 
-    min_activity_value = 0.05
-    spread_penalty_rate = -0.8
-    weight_diff_from_desired = 0.2
-    num_desired_high = 9
-    theta = 0.35
+    min_activity_value = 0.2
+
+    # penalty_rate = -0.01
+    # spread_penalty_rate = -0.8
+    # weight_diff_from_desired = 0.2
+    # num_desired_high = 9
+    # theta = 0.35
 
     crn = CodeRingNetwork(num_ring_units=ring_neurons,
                         num_code_units=code_neurons,
@@ -1037,10 +1092,16 @@ if __name__ == '__main__':
                     train_init_lr, train_lr_decay,
                     durs, tmax, tsteps, plot_gif=False, plot_results=False,
                     min_activity_value=min_activity_value,
-                    spread_penalty_rate=spread_penalty_rate,
-                    weight_diff_from_desired=weight_diff_from_desired,
-                    theta=theta,
-                    noise_num_low=noise_num_low, noise_num_high=noise_num_high)
+                    noise_rate_low=noise_rate_low, noise_rate_high=noise_rate_high,
+                    noise_num_low=noise_num_low, noise_num_high=noise_num_high,
+                    metric_init_mu=metric_init_mu,
+                    metric_mu_decay=metric_mu_decay,
+                    score_mu=score_mu,
+                    metric_init_beta=metric_init_beta,
+                    metric_beta_decay=metric_beta_decay,
+                    score_beta=score_beta)
+    
+                    # penalty_rate=penalty_rate,
                     # curv_penalty_rate=curv_penalty_rate, 
                     # intersec_penalty_rate=intersec_penalty_rate, 
                     # doodle_len_beta=doodle_len_beta, 
