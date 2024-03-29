@@ -53,14 +53,40 @@ def exponential(t: (float, np.ndarray), rate: float, init_val: float, center: fl
 
 def bimodal_exponential_noise(num_low, num_high, noise_rate_low, noise_rate_high, shuffle=True, clip_01=True):
     '''
-    Returns a shuffled vector of noise values clipped to [0,1]. Returned vector is in the shape (num_low + num_high, 1).
+    Returns a rolled or shuffled vector of noise values clipped to [0,1]. Returned vector is in the shape (num_low + num_high, 1).
     '''
     noise1 = np.random.exponential(1 / noise_rate_low, num_low)
     noise2 = 1 - np.random.exponential(1 / noise_rate_high, num_high)
     noise = np.concatenate((noise1, noise2))
     if shuffle:
         np.random.shuffle(noise)
+    else:
+        random_roll = np.random.rand(0, num_low+num_high)
+        noise = np.roll(noise, random_roll)
     if clip_01:
+        noise = np.clip(noise, 0, 1)
+
+    return noise
+
+def bimodal_gaussian_noise(num_low, num_high, mean_low, mean_high, sigma_low, sigma_high, shuffle=True, clip_01=True):
+    noise1 = np.random.normal(loc=mean_low, scale=sigma_low, size=num_low)
+    noise2 = np.random.normal(loc=mean_high, scale=sigma_high, size=num_high)
+    noise = np.concatenate((noise1, noise2))
+    if shuffle:
+        np.random.shuffle(noise)
+    else:
+        random_roll = np.random.randint(0, num_low+num_high)
+        noise = np.roll(noise, random_roll)
+
+    if clip_01:
+        high_idxs = np.argwhere(noise > 1.0).flatten()
+        noise[high_idxs] = np.clip(noise[high_idxs], 0, 1)
+        noise[high_idxs] -= np.random.rand(len(high_idxs)) * 0.1
+
+        low_idxs = np.argwhere(noise < 0.0).flatten()
+        noise[low_idxs] = np.clip(noise[low_idxs], 0, 1)
+        noise[low_idxs] += np.random.rand(len(low_idxs)) * 0.1
+
         noise = np.clip(noise, 0, 1)
 
     return noise
