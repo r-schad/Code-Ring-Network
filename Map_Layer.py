@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from utilities import bimodal_exponential_noise
+from utilities import bimodal_exponential_noise, bimodal_gaussian_noise
 
 class MapLayer():
     def __init__(self, map_d1: int, map_d2: int, num_ring_units: int, num_code_units: int,
@@ -37,12 +37,15 @@ class MapLayer():
         self.weights_to_code_from_map = np.ndarray((num_code_units, int(map_d1*map_d2)))
         # initialize weights with exponential distribution (same as noise generating process)
         for m in range(int(map_d1*map_d2)):
-            self.weights_to_code_from_map[:,m] = bimodal_exponential_noise(num_low=init_kwargs['noise_num_low'], 
-                                                                            num_high=init_kwargs['noise_num_high'], 
-                                                                            noise_rate_low=init_kwargs['noise_rate_low'],
-                                                                            noise_rate_high=init_kwargs['noise_rate_high'],
-                                                                            shuffle=False,
-                                                                            clip_01=True)
+            code_noise = bimodal_gaussian_noise(num_low=init_kwargs['noise_num_low'],
+                                                num_high=init_kwargs['noise_num_high'],
+                                                mean_low=init_kwargs['noise_mean_low'],
+                                                mean_high=init_kwargs['noise_mean_high'],
+                                                sigma_low=init_kwargs['noise_sigma_low'],
+                                                sigma_high=init_kwargs['noise_sigma_high'],
+                                                shuffle=False,
+                                                clip_01=True).reshape(self.num_code_units, 1)
+            self.weights_to_code_from_map[:,m] = code_noise.flatten()
         # defines a `view` of original array - they point to same memory - between W_CM and W_MC
         self.weights_to_map_from_code = self.weights_to_code_from_map.T
 
