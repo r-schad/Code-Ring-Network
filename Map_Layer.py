@@ -43,7 +43,7 @@ class MapLayer():
                                                 mean_high=init_kwargs['noise_mean_high'],
                                                 sigma_low=init_kwargs['noise_sigma_low'],
                                                 sigma_high=init_kwargs['noise_sigma_high'],
-                                                shuffle=False,
+                                                shuffle=True,
                                                 clip_01=True).reshape(self.num_code_units, 1)
             self.weights_to_code_from_map[:,m] = code_noise.flatten()
         # defines a `view` of original array - they point to same memory - between W_CM and W_MC

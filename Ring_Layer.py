@@ -54,7 +54,7 @@ class RingLayer:
         self.headings = np.array([[np.cos(dir), np.sin(dir)] for dir in self.directions])
     
     def activate(self, input_from_code: np.ndarray, dur_outputs: np.ndarray,
-                 t_max: int, t_steps: int) -> float:
+                 t_max: int, t_steps: int, cutoff: bool = True) -> float:
         '''
         Applies the outputs of the code and duration layers into the ring layer to determine outputs of the ring layer.
 
@@ -89,7 +89,11 @@ class RingLayer:
         t = np.linspace(0, t_max, t_steps)
 
         # integrate model over discretized timesteps
-        result = solve_ivp(fun=lambda t, state: self.doodle(t, input_from_code, dur_outputs, state), t_span=(min(t), max(t)), dense_output=True, y0=state, event=self.stop_drawing)
+        if cutoff:
+            result = solve_ivp(fun=lambda t, state: self.doodle(t, input_from_code, dur_outputs, state), t_span=(min(t), max(t)), dense_output=True, y0=state, event=self.stop_drawing)
+        else:
+            result = solve_ivp(fun=lambda t, state: self.doodle(t, input_from_code, dur_outputs, state), t_span=(min(t), max(t)), t_eval=t, y0=state)
+            
         if not result.success:
             return 0
         v_series = result.y[:self.num_ring_units,]
