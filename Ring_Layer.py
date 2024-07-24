@@ -18,23 +18,22 @@ class RingLayer:
     def __init__(self, num_ring_units: int = 36,
                  tau: float = 1.0, lambda_: float = 20, psi: float = 1.2, # activation
                  rho: float = 0.1, gamma: float = 0.1, # deactivation
-                 phi: float = 0.5, # resource depletion
-                 alpha: float = 0.9, # drawing momentum
-                 beta: float = 50.0, mu: float = 0.1, # output sigmoid transform
+                 phi: float = 1.2, # resource depletion
+                 alpha: float = 0.5, # drawing momentum
+                 beta: float = 200.0, mu: float = 0.1, # output sigmoid transform
                  epsilon: float = 0.00001) -> None:
         '''
-        :param num_ring_units int: 3
-        # TODO: describe each parameter's function in the model
-        :param tau float:
-        :param lambda_ float:
-        :param psi float:
-        :param rho float:
-        :param gamma float:
-        :param beta float:
-        :param mu float:
-        :param phi float:
-        :param alpha float:
-        :param epsilon float:
+        :param num_ring_units int: number of ring neurons
+        :param tau float = 1.0: time constant for the effector system
+        :param lambda_ float = 20: gain parameter on the activation/deactivation product
+        :param psi float = 1.2: gain parameter on the lateral inhibition from active neuron
+        :param rho float = 0.1: gain parameter for the decrease in deactivation signal
+        :param gamma float = 0.1: gain parameter for the increase in deactivation signal
+        :param beta float = 200: steepness of the v->z sigmoid 
+        :param mu float = 0.1: center of the v->z sigmoid
+        :param phi float = 1.2: gain parameter on the resource depletion rate 
+        :param alpha float = 0.5: momentum constant on the doodling process
+        :param epsilon float = 0.00001: small value to avoid divide by zero errors
 
         :returns: None
         '''
@@ -58,7 +57,7 @@ class RingLayer:
         '''
         Applies the outputs of the code and duration layers into the ring layer to determine outputs of the ring layer.
 
-        :param input_from_code np.ndarray: "I"; the array of outputs of the code layer, and inputs into the ring layer
+        :param input_from_code np.ndarray: "r^0"; the array of outputs of the code layer, and inputs into the ring layer
             code_outputs determine the order of activation of the ring neurons        
         :param dur_outputs np.ndarray: "c"; the array of outputs of the duration layer, and inputs into the ring layer
             dur_outputs determine the duration that each ring neuron is activated
@@ -66,7 +65,7 @@ class RingLayer:
         :param t_steps int: the number of timesteps to integrate over from [0, t_max]
         :param folder_name str: the model instance's corresponding folder name
         :param epoch int: the current epoch
-        :param vars_to_plot dict: which of the 4 series should be plotted (v, u, z, I_prime)
+        :param vars_to_plot dict: which of the 4 series should be plotted (v, u, z, r)
             keys=the four series listed above, 
             values=bool indicating if each corresponding series should be plotted
         :param plot_results bool: whether a plot of the results should be created
@@ -80,9 +79,9 @@ class RingLayer:
 
         input_from_code = input_from_code.squeeze()
 
-        # create state vector out of the 3 vectors v, u, I so it's 1-D to work with solve_ivp()
-        # state is initialized as [v_0, ... , v_N-1, u_0, ..., u_N-1, I_0, ..., I_N-1]
-        # so, I' is initialized to I (AKA input_from_code)
+        # create state vector out of the 3 vectors v, u, r so it's 1-D to work with solve_ivp()
+        # state is initialized as [v_0, ... , v_N-1, u_0, ..., u_N-1, r^0_0, ..., r^0_N-1]
+        # so, r is initialized to r^0 (AKA input_from_code)
         state = np.array((v, u, input_from_code)).reshape(3*self.num_ring_units)
 
         # define our discretized timesteps
@@ -99,14 +98,23 @@ class RingLayer:
         v_series = result.y[:self.num_ring_units,]
         z_series = sigmoid(v_series, self.beta, self.mu)
         u_series = result.y[self.num_ring_units:2*self.num_ring_units,]
-        I_prime_series = result.y[2*self.num_ring_units:,]
+        r_series = result.y[2*self.num_ring_units:,]
 
-        return v_series, z_series, u_series, I_prime_series
+        return v_series, z_series, u_series, r_series
     
     @event_attr()
     def stop_drawing(self, t, state):
-        I_prime_series = state[2*self.num_ring_units:]
-        return np.max(I_prime_series) - 0.05
+        '''
+        Utility function that returns a value below 0 when all effectors
+            have remaining resource below 0.05. When scipy detects the resource
+            value crossing the x-axis, it stops integration (solve_ivp). 
+        NOTE: scipy requires t to be given as the first argument in any event function,
+            even if it's not used.
+        :param t int: time variable required by scipy for terminal functions, but not actually used
+        :param state np.ndarray: array of shape (3*N) containing v, u, and r vectors
+        '''
+        r_series = state[2*self.num_ring_units:]
+        return np.max(r_series) - 0.05
         
     def create_drawing(self, z_series: np.ndarray, t_steps: int) -> tuple:
         '''
@@ -127,9 +135,8 @@ class RingLayer:
         alphas = np.cumprod([self.alpha] * (t_steps - 1))
         alphas = np.array([0] + list(alphas))
 
-        # recurrence relation boils down to the following momentum term
+        # recurrence relation for momentum boils down to the following terms
         # convolve(N, M) gives a result of n + m - 1 elements. we only need the first t_steps
-        # TODO: turn the recurrence relation back to a loop. or maybe at least compare performance/time between the two
         xs_with_momentum = ((1 - self.alpha) * (z_series.T @ self.headings).T[0,:] +
                                      (1 - self.alpha) * np.convolve((z_series.T @ self.headings).T[0,:], alphas)[:t_steps])
         
@@ -149,42 +156,42 @@ class RingLayer:
             function inputted into solve_ivp.
         NOTE: Because we can't provide a vectorized state (i.e. state can't 
             be more than 1-d in solve_ivp()), we hide the three vectors in state, 
-            so state is a vector of [v, u, I'], where v, u, and I' are all 
+            so state is a vector of [v, u, r], where v, u, and r are all 
             vectors of length `num_ring_units`.
     
-            Then, we can handle the change in v, u, and I' separately, 
+            Then, we can handle the change in v, u, and r separately, 
             and concat them back together to be returned as the new state.
 
         :param t np.ndarray: array of the timestep values to integrate over
             (per solve_ivp() documentation, t is a necessary parameter for the function being applied to solve_ivp().
-            but should not be used in the function)
+            but may not be used in the function)
         :param ring_input np.ndarray: input values provided by the code layer
         :param dur_values np.ndarray: input values provided by the duration layer
-        :param state np.ndarray: array of shape (3*N) containing v, u, and I' vectors
-            state is defined by [v_0, ..., v_N-1, u_0, ..., u_N-1, I'_0, ..., I'_N-1]
+        :param state np.ndarray: array of shape (3*N) containing v, u, and r vectors
+            state is defined by [v_0, ..., v_N-1, u_0, ..., u_N-1, r_0, ..., r_N-1]
             this is done because solve_ivp() does not allow more than 1-D arrays in it, so we compensate by combining
             our 3 vectors into one long array and then split them apart for actual use inside the function being
             integrated by solve_ivp()
 
-        :returns new_state np.ndarray: array of shape (3*N) containing the updated v, u, and I' vectors after the current timestep
-            new_state is defined in identical fashion to state: [v_0, ..., v_N-1, u_0, ..., u_N-1, I'_0, ..., I'_N-1]
+        :returns new_state np.ndarray: array of shape (3*N) containing the updated v, u, and r vectors after the current timestep
+            new_state is defined in identical fashion to state: [v_0, ..., v_N-1, u_0, ..., u_N-1, r_0, ..., r_N-1]
         '''
         # split state into 3 vectors
         v = state[0:self.num_ring_units]
         u = state[self.num_ring_units:2*self.num_ring_units]
-        I_prime = state[2*self.num_ring_units:3*self.num_ring_units]
+        r = state[2*self.num_ring_units:3*self.num_ring_units]
 
-        assert set([v.shape[0], u.shape[0], I_prime.shape[0]]) == set([self.num_ring_units]), f"State's shapes don't match! {v.shape, u.shape, I_prime.shape}"
+        assert set([v.shape[0], u.shape[0], r.shape[0]]) == set([self.num_ring_units]), f"State's shapes don't match! {v.shape, u.shape, r.shape}"
 
         z = sigmoid(v, self.beta, self.mu)
-        # calculate dv/dt, du/dt, DI'/dt
+        # calculate dv/dt, du/dt, Dr/dt
         inhibition_vec = 1 - (self.psi * np.dot(z, 1 - np.eye(self.num_ring_units))) # multiply by the sum of *other* neuron's outputs
-        dv = (1 / self.tau) * ((-1 * self.lambda_ * u * v) + (I_prime * inhibition_vec))
-        du = (-1 * self.rho * u) + (self.gamma * I_prime * (z) / (dur_values + self.epsilon))
-        dI_prime = -1 * self.phi * ring_input * z
+        dv = (1 / self.tau) * ((-1 * self.lambda_ * u * v) + (r * inhibition_vec))
+        du = (-1 * self.rho * u) + (self.gamma * r * (z) / (dur_values + self.epsilon))
+        dr = -1 * self.phi * ring_input * z
         
-        # join v, u, and I' back together to be returned
-        new_state = np.array((dv, du, dI_prime)).reshape(3*self.num_ring_units)
+        # join v, u, and r back together to be returned
+        new_state = np.array((dv, du, dr)).reshape(3*self.num_ring_units)
 
         return new_state
 

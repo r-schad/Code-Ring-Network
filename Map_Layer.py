@@ -31,11 +31,8 @@ class MapLayer():
 
         self.neurons = np.array([[[i,j] for j in range(self.d1)] for i in range(self.d2)])
         self.dist_arrays = self.get_distances_for_all_neurons()
-        # TODO: determine method of weight init. good trials were just uniform [0,1] but pretraining dragged everything towards 0 anyways
-        # self.weights_to_code_from_map = np.random.uniform(0.0, 0.2, size=(num_code_units, int(map_d1*map_d2)))
-        # self.weights_to_code_from_map = np.random.uniform(low=weight_min, high=weight_max, size=(num_code_units, int(map_d1*map_d2)))
         self.weights_to_code_from_map = np.ndarray((num_code_units, int(map_d1*map_d2)))
-        # initialize weights with exponential distribution (same as noise generating process)
+        # initialize weights with bimodal Gaussian distribution (same as noise generating process)
         for m in range(int(map_d1*map_d2)):
             code_noise = bimodal_gaussian_noise(num_low=init_kwargs['noise_num_low'],
                                                 num_high=init_kwargs['noise_num_high'],

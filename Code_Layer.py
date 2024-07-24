@@ -8,7 +8,7 @@ class CodeLayer:
     '''
     def __init__(self, num_map_units: int, num_ring_units: int,
                  num_code_units: int, code_factor: int,
-                 code_ring_spread: float = 0.02) -> None:
+                 code_ring_spread: float = 0.00001) -> None:
         '''
         :param num_map_units int: number of neurons in the map layer.
         :param num_ring_units int: number of neurons in the ring layer.
@@ -17,9 +17,7 @@ class CodeLayer:
             i.e., the number of neurons in code layer per ring neuron.
         :param code_ring_spread float: the standard deviation of the Gaussian curve 
             used for determining the strength of weights from Code->Ring. 
-            Default of 0.02 will give a weight of ~0.4 to the immediate neighbors of the corresponding
-            ring unit, and a weight of ~0.02 to the neighbors 2-steps away from the peak ring unit for a
-            given code unit, and basically ~0.00 to all further neurons.
+
 
         :returns: None
         '''
@@ -32,7 +30,7 @@ class CodeLayer:
 
         self.weights_to_ring_from_code = self.get_gauss_ring_weights(scale=code_ring_spread)
 
-    def get_gauss_ring_weights(self, scale: float = 0.02):
+    def get_gauss_ring_weights(self, scale: float = 0.00001):
         '''
         Defines the weights from Code->Ring, which are either shaped in a circular strip,
         with width=`self.code_factor`. These weights are based on a Gaussian curve, with 
@@ -41,10 +39,8 @@ class CodeLayer:
         on the Gaussian curve used.
 
         :param scale float: the standard deviation of the Gaussian curve used for determining the strength
-                            of weights from Code->Ring. 
-                            Default of 0.02 will give a weight of ~0.4 to the immediate neighbors of the corresponding
-                            ring unit, and a weight of ~0.02 to the neighbors 2-steps away from the peak ring unit for a
-                            given code unit.
+            of weights from Code->Ring. Default of 0.00001 will give a weight of ~0.0 
+            to the immediate neighbors of the corresponding ring unit, making it essentially singly-connected.
 
         :returns cov_mat_strip np.ndarray: the array of weights to ring from code layer, 
             with shape (num_ring_units, num_code_units, code_factor).
